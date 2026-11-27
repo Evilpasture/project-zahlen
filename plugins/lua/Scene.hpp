@@ -6,7 +6,7 @@
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-// Bridges Zahlen's math and Scene descriptor types onto ReflectLua.
+// Bridges Zahlen's math and Scene descriptor types onto Lua.
 // Uses Zahlen math value types exclusively (Jolt stays private to the engine).
 
 #include <Scene/Scene.hpp>
@@ -14,6 +14,6 @@
 #include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <lua/LuaValueTypes.hpp>
-#include <lua/ReflectLua.hpp>
+#include <lua/ValueTypes.hpp>
+#include <lua/Lua.hpp>
 

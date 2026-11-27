@@ -20,6 +20,7 @@
 #include <Zahlen/Core/COM/ItaniumMangle.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/Core/SharedLibrary.hpp>
+#include <lua/Plugin.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
@@ -795,4 +796,56 @@ void test_plugin_capability_isolators_com_abi() {
     }
 #endif
 }
+
+void test_plugin_lua_com_virtual_machine_boundary() {
+    // Lua::IPlugin is reached through the same COM::IAppLayer entry point as
+    // every other plugin; no LuaJIT or zahlen_lua symbols are linked here.
+    auto opened = OpenTestPlugin("lua");
+    if (!ExpectTrue(opened.has_value())) {
+        return;
+    }
+    auto plugin = opened->layer.cast<ZHLN::Lua::IPlugin>();
+    if (!ExpectTrue(static_cast<bool>(plugin))) {
+        return;
+    }
+    const ZHLN::Lua::Budget budget {
+        .maxInstructions     = 32'768,
+        .maxMemoryBytes      = 1024 * 1024,
+        .rejectUnknownFields = true,
+    };
+    const auto chain = ZHLN::COM::InChain(budget);
+    auto       vm    = plugin->CreateVirtualMachine(chain.Head());
+    if (!ExpectTrue(vm.has_value())) {
+        return;
+    }
+    // A budget that cannot even allocate the Lua state must fail at creation,
+    // not hand back an invalid IVirtualMachine instance.
+    const ZHLN::Lua::Budget tinyBudget {
+        .maxInstructions     = 64,
+        .maxMemoryBytes      = 1,
+        .rejectUnknownFields = true,
+    };
+    const auto tinyChain = ZHLN::COM::InChain(tinyBudget);
+    ExpectFalse(plugin->CreateVirtualMachine(tinyChain.Head()).has_value());
+
+    ExpectTrue((*vm)->IsValid());
+    ExpectTrue((*vm)->ExecuteString("return 1 + 1", "com_boundary.lua").has_value());
+    ExpectTrue((*vm)->LastErrorDetail().empty());
+
+    // The Raw seam follows COM's count-fill contract: a short buffer reports
+    // the full length and COM::Collect can allocate exactly that many bytes.
+    ExpectFalse((*vm)->ExecuteString("this is not lua", "bad.lua").has_value());
+    const auto detail = ZHLN::COM::Collect<&ZHLN::Lua::IVirtualMachine::LastErrorDetailRaw>(**vm);
+    ExpectTrue(!detail.empty());
+    char prefix[8] {};
+    const auto needed = (*vm)->LastErrorDetailRaw(prefix, static_cast<uint32_t>(sizeof(prefix)));
+    ExpectEq(needed, static_cast<uint32_t>(detail.size()));
+    if (detail.size() >= sizeof(prefix)) {
+        ExpectEq(std::string_view(prefix, sizeof(prefix)), std::string_view(detail).substr(0, sizeof(prefix)));
+    }
+    vm = {};
+    plugin = {};
+    opened->layer = {};
+}
+
 } // namespace ZHLN::Test

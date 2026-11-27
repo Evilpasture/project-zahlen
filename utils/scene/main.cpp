@@ -16,14 +16,9 @@
 #include <UI/HostUI.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
-#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/QualityPresets.hpp>
 #include <Zahlen/Render/Info.hpp>
-#if defined(ZHLN_SCENE_HOST_HAS_LUA)
-#include <lua/ReflectLua.hpp>
-#include <lua/ReflectLuaFile.hpp>
-#endif
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
 #include <Discord/RichPresence.hpp>
 #endif
@@ -43,64 +38,17 @@
 namespace {
 struct HostLaunchConfig {
     std::filesystem::path scenePath;
-    std::filesystem::path graphicsConfigPath = "config/graphics.lua";
     bool                  rasterOnly         = false;
     bool                  terrainDemo        = false;
     std::vector<std::string> consoleCommands;
 };
 
-#if defined(ZHLN_SCENE_HOST_HAS_LUA)
-void ApplyGraphicsProfileFromLua(ZHLN::COM::IEngine& engine, const std::filesystem::path& path) {
-    auto source = ZHLN::ReflectLua::ReadFileText(path);
-    if (!source) {
-        return;
-    }
-    const std::string      chunkName = "@" + path.generic_string();
-    const auto             info      = engine.Graphics()->Info();
-    const ZHLN::RenderInfo hw {
-        .rendererName         = std::string_view(info.rendererName),
-        .gpuName              = std::string_view(info.gpuName),
-        .deviceType           = info.deviceType,
-        .presentationMode     = info.presentationMode,
-        .pacingPolicy         = info.pacingPolicy,
-        .meshShadingSupported = info.meshShadingSupported,
-        .meshShadingActive    = info.meshShadingActive,
-        .rayTracingSupported  = info.rayTracingSupported
-    };
 
-    const auto applyOverlay = [&](ZHLN::GraphicsSettings& dst) -> std::expected<void, ZHLN::ErrorCode> {
-        auto callRes = ZHLN::ReflectLua::ApplyCallPatchString(dst, *source, chunkName, ZHLN::LuaBudget {}, hw);
-        if (!callRes && callRes.error() == ZHLN::LuaError::NotAFunction) {
-            return ZHLN::ReflectLua::ApplyPatchString(dst, *source, chunkName);
-        }
-        return callRes;
-    };
-
-    const ZHLN::GraphicsSettings base    = engine.Graphics()->Settings();
-    ZHLN::GraphicsSettings       staging = base;
-    if (auto res = applyOverlay(staging); !res) {
-        ZHLN::Log<ZHLN::LogSeverity::Warning>("'{}' rejected ({}); keeping live settings.", path.string(), res.error());
-        return;
-    }
-
-    if (staging.qualityPreset != ZHLN::QualityLevel::Custom && staging.qualityPreset != base.qualityPreset) {
-        ZHLN::GraphicsSettings presetLayered = base;
-        ZHLN::ApplyPreset(presetLayered, staging.qualityPreset);
-        if (applyOverlay(presetLayered)) {
-            staging = presetLayered;
-        }
-    }
-
-    engine.Graphics()->ApplySettings(staging);
-    ZHLN::COM::Log(engine.Logger(), "applied declarative profile '{}' (preset={}).", path.string(), ZHLN::Reflect::EnumToString(staging.qualityPreset));
-}
-#endif
 
 struct DiagnosticHost {
     HostLaunchConfig*                            launch;
     ZHLN::FallbackScene::DefaultPreset           fallback;
     std::unique_ptr<ZHLN::HostUI>                hostUI;
-    std::unique_ptr<ZHLN::FS::FileSystemWatcher> watcher;
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
     std::unique_ptr<ZHLN::Discord::PresenceClient> presence;
 #endif
@@ -159,25 +107,11 @@ struct DiagnosticHost {
         if (!launch->consoleCommands.empty())
             return std::unexpected(ZHLN::COM::Error::UnsupportedExtension);
 #endif
-#if defined(ZHLN_SCENE_HOST_HAS_LUA)
-        const auto path = launch->graphicsConfigPath;
-        if (!path.empty() && std::filesystem::exists(path)) {
-            ApplyGraphicsProfileFromLua(engine, path);
-            watcher          = std::make_unique<ZHLN::FS::FileSystemWatcher>();
-            const auto watch = watcher->WatchFile(path, [&engine, path](const ZHLN::FS::FileWatchEvent& event) {
-                if (event.action != ZHLN::FS::FileWatchAction::Deleted)
-                    ApplyGraphicsProfileFromLua(engine, path);
-            });
-            if (!watch)
-                ZHLN::COM::LoggerView{engine.Logger()}.Warn("could not watch '{}'.", path.string());
-        }
-#endif
+
         return {};
     }
     auto Tick(ZHLN::COM::IEngine& engine, float delta) -> std::expected<void, ZHLN::ErrorCode> {
         dt = delta;
-        if (watcher)
-            watcher->DispatchEvents();
         if (fallback.IsActive())
             fallback.Update(engine, delta);
 #if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
@@ -209,7 +143,6 @@ struct DiagnosticHost {
 #endif
         // External workers/callbacks and the preset's retained engine reference
         // are retired while Application's process/task scope is still alive.
-        watcher.reset();
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
         presence.reset();
 #endif
@@ -245,17 +178,6 @@ int main(int argc, char* argv[]) {
             }
         },
         ZHLN::CliFlag {
-            .key         = "--graphics-config",
-            .placeholder = "<file.lua>",
-            .description = "Lua graphics profile to watch (default: config/graphics.lua)",
-            .action      = [&](std::string_view value) -> std::expected<void, ZHLN::CommandLineError> {
-                if (value.empty())
-                    return std::unexpected(ZHLN::CommandLineError::MissingValue);
-                launch.graphicsConfigPath = value;
-                return {};
-            }
-        },
-        ZHLN::CliFlag {
             .key         = "--terrain-demo",
             .description = "Run the COM snow terrain / heightfield / combat host demo",
             .action      = [&](std::string_view) -> std::expected<void, ZHLN::CommandLineError> {
@@ -274,15 +196,7 @@ int main(int argc, char* argv[]) {
     };
     auto app = ZHLN::App(ZHLN::EngineConfig {.appName = "Zahlen Scene Host"});
     app.WithCliOptions(handlers);
-#if !defined(ZHLN_SCENE_HOST_HAS_LUA)
-    app.BeforeEngineCreate([&]() -> std::expected<void, ZHLN::ErrorCode> {
-        if (launch.graphicsConfigPath != "config/graphics.lua") {
-            std::println(stderr, "[SceneHost] --graphics-config requires the Lua extension");
-            return std::unexpected(ZHLN::COM::Error::UnsupportedExtension);
-        }
-        return {};
-    });
-#endif
+
     app.AddLayer(DiagnosticHost {.launch = &launch});
     return app.Main(argc, argv);
 }

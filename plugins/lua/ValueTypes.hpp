@@ -7,8 +7,8 @@
 #include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <lua/ReflectLua.hpp>
-namespace ZHLN::ReflectLua {
+#include <lua/Lua.hpp>
+namespace ZHLN::Lua {
 // Native math values must retain the same sequence/named-table Lua contract as
 // Jolt's storage vectors. Their fields are public and reflection can visit them.
 template <>
@@ -52,10 +52,10 @@ struct ValueTrait<ZHLN::Matrix<T, Rows, Cols, Alignment>> {
     static auto Read(Value reader) -> std::expected<Mat, ErrorCode> {
         const auto lengthOpt = reader.SequenceLength();
         if (!lengthOpt)
-            return std::unexpected(LuaError::TypeMismatch);
+            return std::unexpected(Error::TypeMismatch);
         const size_t length = *lengthOpt;
         if (length != Rows * Cols)
-            return std::unexpected(LuaError::OutOfRange);
+            return std::unexpected(Error::OutOfRange);
         Mat value {};
         if (auto result = TemplatedDetail::ReadInto(value.elements, reader); !result)
             return std::unexpected(result.error());
@@ -79,7 +79,7 @@ struct ValueTrait<FVec3> {
         if (const auto seqLenOpt = reader.SequenceLength()) {
             const size_t seqLen = *seqLenOpt;
             if (seqLen != 3u) {
-                return std::unexpected(LuaError::OutOfRange);
+                return std::unexpected(Error::OutOfRange);
             }
             std::array<float, 3> comps {0.0f, 0.0f, 0.0f};
             if (auto res = TemplatedDetail::ReadInto(comps, reader); !res) {
@@ -113,7 +113,7 @@ struct ValueTrait<FVec4> {
         if (const auto seqLenOpt = reader.SequenceLength()) {
             const size_t seqLen = *seqLenOpt;
             if (seqLen != 4u) {
-                return std::unexpected(LuaError::OutOfRange);
+                return std::unexpected(Error::OutOfRange);
             }
             std::array<float, 4> comps {0.0f, 0.0f, 0.0f, 1.0f};
             if (auto res = TemplatedDetail::ReadInto(comps, reader); !res) {
@@ -149,7 +149,7 @@ struct ValueTrait<ZHLN::Quat> {
         if (const auto seqLenOpt = reader.SequenceLength()) {
             const size_t seqLen = *seqLenOpt;
             if (seqLen != 4u) {
-                return std::unexpected(LuaError::OutOfRange);
+                return std::unexpected(Error::OutOfRange);
             }
             std::array<float, 4> comps {0.0f, 0.0f, 0.0f, 1.0f};
             if (auto res = TemplatedDetail::ReadInto(comps, reader); !res) {
@@ -177,4 +177,4 @@ struct ValueTrait<ZHLN::Quat> {
     }
 };
 
-} // namespace ZHLN::ReflectLua
+} // namespace ZHLN::Lua

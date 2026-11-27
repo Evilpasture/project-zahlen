@@ -111,8 +111,9 @@ and resets host state; geometry remains engine scene-owned. The preset does not
 despawn geometry as a side effect of dropping UI state. The host explicitly
 clears/replaces scene contents when changing documents.
 
-The CLI retains --scene and --graphics-config and adds --frames (0 unlimited)
-and --raster-only (explicit no-BLAS scene upload). BLAS remains enabled by
+The CLI retains --scene and adds --frames (0 unlimited)
+and --raster-only (explicit no-BLAS scene upload); graphics settings come from
+the scene document, not a Lua profile. BLAS remains enabled by
 default; there is no environment/device detection workaround. The fallback's
 RTR setting is disabled for its explicit raster-only build. Source prefabs must
 be prepared by the host before a document references them.

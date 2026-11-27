@@ -111,6 +111,20 @@ constexpr void ForEachFieldWithName(T&& t, F&& f) {
     };
 }
 
+// Same walk as `ForEachFieldWithName`, but also hands the caller a typed hook
+// carrying the member's reflection info. Consumers that only need annotations
+// can call `Reflect::HasAnnotation<Tag, member>()` from that hook instead of
+// splicing `std::meta` themselves, which keeps reflection syntax inside
+// Reflection/. The member type is passed as a tag so callers can branch on
+// reference members without another meta query.
+template <typename T, typename F>
+constexpr void ForEachDataMemberWithMeta(T&& t, F&& f) {
+    [:Expand(TemplatedDetail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto {
+        constexpr std::string_view name = std::meta::has_identifier(member) ? std::meta::identifier_of(member) : std::string_view("");
+        f.template operator()<member, typename[:std::meta::type_of(member):]>(name, std::forward<T>(t).[:member:]);
+    };
+}
+
 template <typename T, typename F>
 constexpr void ForEachDataMember(F&& f) {
     [:Expand(TemplatedDetail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto { f.template operator()<member>(); };

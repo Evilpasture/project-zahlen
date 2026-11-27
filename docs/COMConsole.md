@@ -28,8 +28,8 @@ LogicWorld adds the data-only PBR component to its explicit publication list so
 debugger commands can be exercised without initializing graphics/audio/windows.
 
 The shared data-only ComponentPolicy identifies external-resource owners. Those
-components can be read, but reflective set/element/nested/Lua patch operations
-are refused. Replacing physics/audio/GPU handles must go through their owning
+components can be read, but reflective set/element/nested mutations are
+refused; Lua patching is no longer part of Console. Replacing physics/audio/GPU handles must go through their owning
 COM capability's lifecycle operations, not overwrite resource fields in place.
 The policy used by engine SceneResources and the debugger is one definition.
 
@@ -37,10 +37,11 @@ The policy used by engine SceneResources and the debugger is one definition.
 
 help/?, types, type, entity/inspect, get, set, patch, sym/addr and find remain.
 Numeric entity/address tokens now require complete parsing (no trailing junk).
-Lua patch still stages/rolls back on invalid fields and uses the existing bounded
-hermetic VM. Builds without Lua retain the explicit disabled-patching diagnostic.
-Zahlen value/matrix/quat Lua conversions have been split into LuaValueTypes.hpp;
-SceneLua.hpp keeps the existing native Jolt adapters for unported callers.
+The `patch` command always reports that Lua patching is unavailable: scripting
+lives in `zahlen_plugin_lua` and the standalone Lua sandbox host, never in the
+Console translation unit. Zahlen value/matrix/quat Lua conversions are kept with
+the Lua implementation in ValueTypes.hpp; Scene.hpp keeps the existing native
+Jolt adapters for unported callers.
 
 The real document/fallback/terrain scene host accepts repeatable startup commands:
 
@@ -83,14 +84,13 @@ native resource object. Do not cache that result across operations/mutations.
 
 ## Packages and verification
 
-Zahlen::Scripting and Zahlen::Console are independently exported. Console's Lua
-build declares Zahlen::Lua/Scene dependencies; installed Lua requires a system
-LuaJIT library, with no Lua headers exposed to consumers. Vendored LuaJIT is
-still supported in-tree, but installed Lua/Console currently rejects that mode
-explicitly instead of exporting a dangling build-tree runtime archive path.
+Zahlen::Scripting and Zahlen::Console are independently exported and neither
+links Zahlen::Lua. Lua is delivered as the `zahlen_plugin_lua` shared library
+(or linked explicitly by the Lua sandbox host/tests); installed Lua requires a
+system LuaJIT library, with no Lua headers exposed to Console consumers.
 
 - Existing Console command tests use real renderer-free COM worlds, including
-  Lua patch arithmetic and rollback, find/entity dumps, matrix ranges and errors.
+  the unavailable-Lua patch diagnostic, find/entity dumps, matrix ranges and errors.
 - Script bridge test uses a POD manifest, fixed strings and fixed arrays through
   COM, preserving scalar/nested/indexed mutation and sparse-set move/removal cases.
 - Five extra lifetime cases cover multi-level boxes, nested arrays, growth/moves,

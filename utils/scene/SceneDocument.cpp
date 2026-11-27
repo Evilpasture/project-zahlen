@@ -6,11 +6,6 @@
 #include <Zahlen/Log.hpp>
 #include <toml/SceneTOML.hpp>
 #include <toml/TOML.hpp>
-#if defined(ZHLN_SCENE_DOC_HAS_LUA)
-#include <lua/ReflectLua.hpp>
-#include <lua/ReflectLuaFile.hpp>
-#include <lua/SceneLua.hpp>
-#endif
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -41,16 +36,7 @@ auto ReadSceneDocument(const std::filesystem::path& path) -> std::expected<Scene
         }
         return std::move(*parsedDoc);
     }
-#if defined(ZHLN_SCENE_DOC_HAS_LUA)
-    if (ext == ".lua") {
-        std::string detail;
-        auto        doc = ReflectLua::EvaluateFile<Scene::Document>(path, {}, &detail);
-        if (!doc && !detail.empty()) {
-            std::println(stderr, "[SceneDocument] '{}': {}", path.string(), detail);
-        }
-        return doc;
-    }
-#endif
+
     return std::unexpected(SceneDocumentError::UnsupportedFormat);
 }
 auto LoadSceneDocument(COM::IEngine& engine, const std::filesystem::path& path, Scene::InstantiateOptions options) -> bool {

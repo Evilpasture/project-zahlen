@@ -1,28 +1,36 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The DataModel-facing Roblox-style surface sits on the existing LuaJIT state.
-// It is deliberately an adapter: Instance userdata retain the canonical C++
-// objects, while value userdata and event connections are Lua-boundary details.
+// ProjectLight's DataModel <-> Lua::VirtualMachine adapter.
 //
-// It is ProjectLight's adapter onto the sandboxed LuaJIT VM (`zahlen_lua`),
-// keeping `plugins/lua/` completely ignorant of gameplay types so the layer DAG
-// (`configure/check_layer_dag.py`) never points upward.
-
-#include <LuaBindings/DataModelBindings.hpp>
-#include <Zahlen/Math/Vec3.hpp>
+// Zero cross-heap GC co-ownership:
+//   * Every Lua userdata payload (`LuaInstanceRef`, `LuaVector3`, `LuaColor3`,
+//     `LuaSignalRef`, `LuaConnectionRef`) satisfies `Lua::TrivialUserdata`
+//     (trivially copyable + trivially destructible, no `__gc` destructors).
+//   * Live C++ `Instance`s are resolved on each boundary crossing through
+//     `DataModel::FindById` (with permanent tombstones guaranteeing destroyed
+//     IDs never alias new allocations).
+//   * C++ `DataModelSignal::Connection` tokens live on the C++ heap inside
+//     `DataModelLuaSession::Impl`; Lua closures live on the Lua heap inside
+//     `Lua::VirtualMachine`'s listener table and execute through `VirtualMachine::InvokeListener`
+//     under the VM's instruction and memory budgets.
 
 #include <DataModel/DataModel.hpp>
+#include <LuaBindings/DataModelBindings.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <lua/Host.hpp>
+#include <lua/Lua.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <memory>
-#include <new>
 #include <optional>
 #include <span>
 #include <string>
@@ -30,1495 +38,1528 @@
 #include <utility>
 #include <vector>
 
-extern "C" {
-#include <lauxlib.h>
-#include <lua.h>
-
-}
-
-
 namespace ZHLN::ProjectLight {
+
 namespace {
 
-constexpr char kInstanceMetatable[] = "ZHLN.ProjectLight.Instance";
-constexpr char kVector3Metatable[] = "ZHLN.ProjectLight.Vector3";
-constexpr char kColor3Metatable[] = "ZHLN.ProjectLight.Color3";
-constexpr char kSignalMetatable[] = "ZHLN.ProjectLight.Signal";
-constexpr char kConnectionMetatable[] = "ZHLN.ProjectLight.Connection";
-constexpr char kContextMetatable[] = "ZHLN.ProjectLight.BindingContext";
+    using ZHLN::Lua::CallFrame;
+    using ZHLN::Lua::ListenerID;
+    using ZHLN::Lua::MetatableSpec;
+    using ZHLN::Lua::MethodEntry;
+    using ZHLN::Lua::VirtualMachine;
 
-char kBindingContextRegistryKey;
-char kInstanceCacheRegistryKey;
+    // ------------------------------------------------------------------------
+    // Pure POD userdata payloads (`Lua::TrivialUserdata`)
+    // ------------------------------------------------------------------------
 
-struct LuaInstance {
-    InstancePtr instance;
-};
+    struct LuaInstanceRef {
+        InstanceId id     = 0;
+        bool       isRoot = false;
+    };
 
-struct LuaVector3 {
-    float x;
-    float y;
-    float z;
-};
+    struct LuaVector3 {
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+    };
 
-struct LuaColor3 {
-    float r;
-    float g;
-    float b;
-};
+    struct LuaColor3 {
+        float r = 0.0f;
+        float g = 0.0f;
+        float b = 0.0f;
+    };
 
-enum class SignalKind : uint8_t {
-    ChildAdded,
-    ChildRemoved,
-    DescendantAdded,
-    DescendantRemoved,
-    Destroying,
-    AncestryChanged,
-    PropertyChanged,
-    HumanoidStateChanged,
-    SoundEnded,
-};
+    enum class SignalKind : uint8_t {
+        ChildAdded,
+        ChildRemoved,
+        DescendantAdded,
+        DescendantRemoved,
+        Destroying,
+        AncestryChanged,
+        PropertyChanged,
+        HumanoidStateChanged,
+        SoundEnded,
+    };
 
-struct LuaSignal {
-    InstancePtr owner;
-    SignalKind kind;
-};
+    struct LuaSignalRef {
+        InstanceId ownerId     = 0;
+        bool       ownerIsRoot = false;
+        SignalKind kind        = SignalKind::ChildAdded;
+    };
 
-struct LuaConnectionRecord {
-    lua_State* state = nullptr;
-    int callbackRef = LUA_NOREF;
-    bool connected = true;
-    std::function<void()> disconnect;
+    struct LuaConnectionRef {
+        uint64_t connectionId = 0;
+    };
 
-    LuaConnectionRecord() = default;
-    LuaConnectionRecord(const LuaConnectionRecord&) = delete;
-    auto operator=(const LuaConnectionRecord&) -> LuaConnectionRecord& = delete;
+    static_assert(ZHLN::Lua::TrivialUserdata<LuaInstanceRef>);
+    static_assert(ZHLN::Lua::TrivialUserdata<LuaVector3>);
+    static_assert(ZHLN::Lua::TrivialUserdata<LuaColor3>);
+    static_assert(ZHLN::Lua::TrivialUserdata<LuaSignalRef>);
+    static_assert(ZHLN::Lua::TrivialUserdata<LuaConnectionRef>);
 
-    ~LuaConnectionRecord() {
-        Disconnect();
-    }
+    // ------------------------------------------------------------------------
+    // C++-owned session & connection state
+    // ------------------------------------------------------------------------
 
-    void Disconnect() {
-        if (!connected) return;
-        connected = false;
-        if (disconnect) {
-            disconnect();
-            disconnect = {};
+    struct ConnectionSlot {
+        uint64_t              id         = 0;
+        ListenerID            listenerId = ZHLN::Lua::kInvalidListenerID;
+        bool                  connected  = true;
+        std::function<void()> disconnectCppSignal;
+    };
+
+    struct BindingHostState {
+        VirtualMachine*                         vm        = nullptr;
+        DataModel*                  dataModel = nullptr;
+        bool                        alive     = true;
+        uint64_t                    nextConnId = 1;
+        std::string                 lastCallbackError;
+        std::vector<ConnectionSlot> connections;
+        // Keeps orphan Instances created via `Instance.new("Model")` (before
+        // being parented under `DataModel::Root()` or `Destroy()`ed) alive on
+        // the C++ heap while preserving zero smart pointers inside Lua userdata.
+        std::vector<InstancePtr>    unparentedPool;
+
+        void TrackIfUnparented(const InstancePtr& instance) {
+            if (!instance || instance->IsDestroyed() || instance->IsDataModelRoot() || instance->Parent()) {
+                return;
+            }
+            for (const InstancePtr& existing: unparentedPool) {
+                if (existing == instance) {
+                    return;
+                }
+            }
+            unparentedPool.push_back(instance);
         }
-        if (state != nullptr && callbackRef != LUA_NOREF && callbackRef != LUA_REFNIL) {
-            luaL_unref(state, LUA_REGISTRYINDEX, callbackRef);
+
+        void PruneUnparentedPool() noexcept {
+            std::erase_if(unparentedPool, [](const InstancePtr& item) {
+                return !item || item->IsDestroyed() || static_cast<bool>(item->Parent());
+            });
         }
-        callbackRef = LUA_NOREF;
-    }
-};
 
-struct LuaBindingContext {
-    lua_State* state = nullptr;
-    DataModel* dataModel = nullptr;
-    std::string   lastCallbackError; // most recent Lua callback failure
-    bool alive = true;
-    std::vector<std::shared_ptr<LuaConnectionRecord>> connections;
-
-    ~LuaBindingContext() {
-        alive = false;
-        for (const auto& connection: connections) {
-            if (connection) connection->Disconnect();
+        [[nodiscard]] auto FindConnection(uint64_t connId) noexcept -> ConnectionSlot* {
+            for (ConnectionSlot& slot: connections) {
+                if (slot.id == connId) {
+                    return &slot;
+                }
+            }
+            return nullptr;
         }
-        connections.clear();
-    }
-};
 
-struct LuaContextUserdata {
-    LuaBindingContext* context = nullptr;
-};
+        void DisconnectSlot(uint64_t connId) noexcept {
+            ConnectionSlot* slot = FindConnection(connId);
+            if (slot == nullptr || !slot->connected) {
+                return;
+            }
+            slot->connected = false;
+            if (slot->disconnectCppSignal) {
+                auto fn = std::move(slot->disconnectCppSignal);
+                slot->disconnectCppSignal = {};
+                fn();
+            }
+            if (vm != nullptr && slot->listenerId != ZHLN::Lua::kInvalidListenerID) {
+                vm->UnregisterListener(slot->listenerId);
+            }
+            slot->listenerId = ZHLN::Lua::kInvalidListenerID;
+        }
 
-struct LuaConnectionUserdata {
-    std::shared_ptr<LuaConnectionRecord> connection;
-};
+        void DisconnectAll() noexcept {
+            for (ConnectionSlot& slot: connections) {
+                if (!slot.connected) {
+                    continue;
+                }
+                slot.connected = false;
+                if (slot.disconnectCppSignal) {
+                    auto fn = std::move(slot.disconnectCppSignal);
+                    slot.disconnectCppSignal = {};
+                    fn();
+                }
+                if (vm != nullptr && slot.listenerId != ZHLN::Lua::kInvalidListenerID) {
+                    vm->UnregisterListener(slot.listenerId);
+                }
+                slot.listenerId = ZHLN::Lua::kInvalidListenerID;
+            }
+            connections.clear();
+        }
+    };
 
-template <typename T>
-auto TestUserdata(lua_State* state, int index, const char* metatable) -> T* {
-    if (lua_type(state, index) != LUA_TUSERDATA || !lua_getmetatable(state, index)) return nullptr;
-    luaL_getmetatable(state, metatable);
-    const bool matches = lua_rawequal(state, -1, -2) != 0;
-    lua_pop(state, 2);
-    return matches ? static_cast<T*>(lua_touserdata(state, index)) : nullptr;
-}
+    // Reserve `UINT64_MAX` in the intern table for the local DataModel root when
+    // its protocol `Id()` is still `0`; ordinary `InstanceId`s allocate up from 1.
+    constexpr uint64_t kRootZeroCacheKey = UINT64_MAX;
 
-auto GetBindingContext(lua_State* state) -> LuaBindingContext* {
-    lua_pushlightuserdata(state, &kBindingContextRegistryKey);
-    lua_rawget(state, LUA_REGISTRYINDEX);
-    auto* holder = static_cast<LuaContextUserdata*>(lua_touserdata(state, -1));
-    LuaBindingContext* context = holder != nullptr ? holder->context : nullptr;
-    lua_pop(state, 1);
-    return context;
-}
-
-auto TestInstance(lua_State* state, int index) -> LuaInstance* {
-    return TestUserdata<LuaInstance>(state, index, kInstanceMetatable);
-}
-
-auto TestVector3(lua_State* state, int index) -> LuaVector3* {
-    return TestUserdata<LuaVector3>(state, index, kVector3Metatable);
-}
-
-auto TestColor3(lua_State* state, int index) -> LuaColor3* {
-    return TestUserdata<LuaColor3>(state, index, kColor3Metatable);
-}
-
-void PushVector3(lua_State* state, float x, float y, float z) {
-    auto* value = static_cast<LuaVector3*>(lua_newuserdata(state, sizeof(LuaVector3)));
-    new (value) LuaVector3 {.x = x, .y = y, .z = z};
-    luaL_getmetatable(state, kVector3Metatable);
-    lua_setmetatable(state, -2);
-}
-
-void PushVector3(lua_State* state, const FVec3& value) {
-    PushVector3(state, value.x, value.y, value.z);
-}
-
-void PushColor3(lua_State* state, float r, float g, float b) {
-    auto* value = static_cast<LuaColor3*>(lua_newuserdata(state, sizeof(LuaColor3)));
-    new (value) LuaColor3 {.r = r, .g = g, .b = b};
-    luaL_getmetatable(state, kColor3Metatable);
-    lua_setmetatable(state, -2);
-}
-
-void PushInstance(lua_State* state, const InstancePtr& instance) {
-    if (!instance) {
-        lua_pushnil(state);
-        return;
+    auto CacheKeyFor(const LuaInstanceRef& ref) noexcept -> uint64_t {
+        return (ref.isRoot && ref.id == 0u) ? kRootZeroCacheKey : ref.id;
     }
 
-    // A weak-value registry makes each live C++ Instance map to one Lua
-    // userdata identity. Besides matching Instance equality, this matters for
-    // scripts that use Instances as table keys (including weak-key tables).
-    lua_pushlightuserdata(state, &kInstanceCacheRegistryKey);
-    lua_rawget(state, LUA_REGISTRYINDEX);
-    if (lua_istable(state, -1)) {
-        lua_pushlightuserdata(state, instance.GetPtr());
-        lua_rawget(state, -2);
-        if (!lua_isnil(state, -1)) {
-            lua_remove(state, -2);
+    auto MakeInstanceRef(const Instance& instance) noexcept -> LuaInstanceRef {
+        return LuaInstanceRef {
+            .id     = instance.Id(),
+            .isRoot = instance.IsDataModelRoot(),
+        };
+    }
+
+    auto ResolveInstance(const BindingHostState* host, const LuaInstanceRef& ref) noexcept -> InstancePtr {
+        if (host == nullptr || !host->alive || host->dataModel == nullptr) {
+            return {};
+        }
+        if (ref.isRoot) {
+            InstancePtr root = host->dataModel->Root();
+            if (root && !root->IsDestroyed()) {
+                return root;
+            }
+            return {};
+        }
+        if (ref.id == 0u) {
+            return {};
+        }
+        return host->dataModel->FindById(ref.id);
+    }
+
+    auto ResolveLiveArgInstance(const CallFrame& frame, int index) noexcept -> InstancePtr {
+        const auto* ref = frame.TestUserdata<LuaInstanceRef>(index);
+        if (ref == nullptr) {
+            return {};
+        }
+        return ResolveInstance(frame.HostContext<BindingHostState>(), *ref);
+    }
+
+    void PushInstance(CallFrame& frame, const InstancePtr& instance) noexcept {
+        if (!instance || instance->IsDestroyed()) {
+            frame.PushNil();
             return;
         }
-        lua_pop(state, 1);
-
-        auto* value = static_cast<LuaInstance*>(lua_newuserdata(state, sizeof(LuaInstance)));
-        new (value) LuaInstance {.instance = instance};
-        luaL_getmetatable(state, kInstanceMetatable);
-        lua_setmetatable(state, -2);
-
-        lua_pushlightuserdata(state, instance.GetPtr());
-        lua_pushvalue(state, -2);
-        lua_rawset(state, -4);
-        lua_remove(state, -2);
-        return;
+        const LuaInstanceRef ref = MakeInstanceRef(*instance);
+        frame.PushInternedUserdata(CacheKeyFor(ref), ref);
     }
 
-    lua_pop(state, 1);
-    auto* value = static_cast<LuaInstance*>(lua_newuserdata(state, sizeof(LuaInstance)));
-    new (value) LuaInstance {.instance = instance};
-    luaL_getmetatable(state, kInstanceMetatable);
-    lua_setmetatable(state, -2);
-}
-
-template <typename T>
-void PushInstance(lua_State* state, const Ref<T>& instance) {
-    PushInstance(state, StaticRefCast<Instance>(instance));
-}
-
-void PushSignal(lua_State* state, const InstancePtr& owner, SignalKind kind) {
-    auto* signal = static_cast<LuaSignal*>(lua_newuserdata(state, sizeof(LuaSignal)));
-    new (signal) LuaSignal {.owner = owner, .kind = kind};
-    luaL_getmetatable(state, kSignalMetatable);
-    lua_setmetatable(state, -2);
-}
-
-void PushConnection(lua_State* state, std::shared_ptr<LuaConnectionRecord> connection) {
-    auto* value = static_cast<LuaConnectionUserdata*>(lua_newuserdata(state, sizeof(LuaConnectionUserdata)));
-    new (value) LuaConnectionUserdata {.connection = std::move(connection)};
-    luaL_getmetatable(state, kConnectionMetatable);
-    lua_setmetatable(state, -2);
-}
-
-auto ReadVector3(lua_State* state, int index, FVec3& out) -> bool {
-    if (const auto* value = TestVector3(state, index)) {
-        out = {value->x, value->y, value->z};
-        return true;
+    template <typename T>
+    void PushInstance(CallFrame& frame, const Ref<T>& instance) noexcept {
+        PushInstance(frame, StaticRefCast<Instance>(instance));
     }
-    if (lua_type(state, index) != LUA_TTABLE) return false;
 
-    const int absoluteIndex = index > 0 ? index : lua_gettop(state) + index + 1;
-    lua_getfield(state, absoluteIndex, "X");
-    const bool hasX = lua_isnumber(state, -1) != 0;
-    const float x = static_cast<float>(lua_tonumber(state, -1));
-    lua_pop(state, 1);
-    lua_getfield(state, absoluteIndex, "Y");
-    const bool hasY = lua_isnumber(state, -1) != 0;
-    const float y = static_cast<float>(lua_tonumber(state, -1));
-    lua_pop(state, 1);
-    lua_getfield(state, absoluteIndex, "Z");
-    const bool hasZ = lua_isnumber(state, -1) != 0;
-    const float z = static_cast<float>(lua_tonumber(state, -1));
-    lua_pop(state, 1);
-    if (!hasX || !hasY || !hasZ) return false;
-    out = {x, y, z};
-    return true;
-}
-
-auto ReadColor3(lua_State* state, int index, FVec3& out) -> bool {
-    if (const auto* value = TestColor3(state, index)) {
-        out = {value->r, value->g, value->b};
-        return true;
+    void PushInstanceArray(CallFrame& frame, std::span<const InstancePtr> instances) noexcept {
+        frame.BeginTable(static_cast<int>(instances.size()), 0);
+        int index = 1;
+        for (const InstancePtr& instance: instances) {
+            PushInstance(frame, instance);
+            frame.SetArrayElementTop(index++);
+        }
     }
-    return ReadVector3(state, index, out);
-}
 
-auto ReadNumber(lua_State* state, int index, float& out) -> bool {
-    if (!lua_isnumber(state, index)) return false;
-    out = static_cast<float>(lua_tonumber(state, index));
-    return true;
-}
-
-auto ReadString(lua_State* state, int index) -> std::optional<std::string> {
-    if (lua_type(state, index) != LUA_TSTRING) return std::nullopt;
-    size_t length = 0;
-    const char* value = lua_tolstring(state, index, &length);
-    return std::string(value != nullptr ? value : "", length);
-}
-
-auto ReadInstance(lua_State* state, int index, InstancePtr& out) -> bool {
-    if (const auto* value = TestInstance(state, index); value != nullptr && value->instance) {
-        out = value->instance;
-        return true;
+    void PushVector3(CallFrame& frame, float x, float y, float z) noexcept {
+        frame.PushUserdata(LuaVector3 {.x = x, .y = y, .z = z});
     }
-    return false;
-}
 
-auto ReadEnumName(lua_State* state, int index) -> std::string_view {
-    if (lua_type(state, index) != LUA_TSTRING) return {};
-    size_t length = 0;
-    const char* value = lua_tolstring(state, index, &length);
-    return value != nullptr ? std::string_view(value, length) : std::string_view {};
-}
-
-auto EqualAsciiCaseInsensitive(std::string_view lhs, std::string_view rhs) noexcept -> bool {
-    if (lhs.size() != rhs.size()) return false;
-    for (size_t i = 0; i < lhs.size(); ++i) {
-        const unsigned char a = static_cast<unsigned char>(lhs[i]);
-        const unsigned char b = static_cast<unsigned char>(rhs[i]);
-        const char lowerA = static_cast<char>(a >= 'A' && a <= 'Z' ? a + ('a' - 'A') : a);
-        const char lowerB = static_cast<char>(b >= 'A' && b <= 'Z' ? b + ('a' - 'A') : b);
-        if (lowerA != lowerB) return false;
+    void PushVector3(CallFrame& frame, const FVec3& value) noexcept {
+        PushVector3(frame, value.x, value.y, value.z);
     }
-    return true;
-}
 
-template <typename E>
-struct ReflectedEnumValues {
-    std::array<E, ZHLN::Reflect::EnumCount<E>()> values {};
-    size_t count = 0;
-};
+    void PushColor3(CallFrame& frame, float r, float g, float b) noexcept {
+        frame.PushUserdata(LuaColor3 {.r = r, .g = g, .b = b});
+    }
 
-template <typename E>
-consteval auto GetReflectedEnumValues() -> ReflectedEnumValues<E> {
-    ReflectedEnumValues<E> result;
-    constexpr auto names = ZHLN::Reflect::EnumNames<E>();
-    for (const std::string_view name: names) {
-        const auto value = ZHLN::Reflect::StringToEnum<E>(name);
-        if (!value) continue;
-        bool alreadyAdded = false;
-        for (size_t i = 0; i < result.count; ++i) {
-            if (result.values[i] == *value) {
-                alreadyAdded = true;
-                break;
+    void PushSignal(CallFrame& frame, const Instance& owner, SignalKind kind) noexcept {
+        frame.PushUserdata(LuaSignalRef {
+            .ownerId     = owner.Id(),
+            .ownerIsRoot = owner.IsDataModelRoot(),
+            .kind        = kind,
+        });
+    }
+
+    auto ReadVector3(const CallFrame& frame, int index) noexcept -> std::optional<FVec3> {
+        if (const auto* vec = frame.TestUserdata<LuaVector3>(index)) {
+            return FVec3 {vec->x, vec->y, vec->z};
+        }
+        if (!frame.IsTable(index)) {
+            return std::nullopt;
+        }
+        const auto x = frame.ReadTableFloatField(index, "X");
+        const auto y = frame.ReadTableFloatField(index, "Y");
+        const auto z = frame.ReadTableFloatField(index, "Z");
+        if (!x || !y || !z) {
+            return std::nullopt;
+        }
+        return FVec3 {*x, *y, *z};
+    }
+
+    auto ReadColor3(const CallFrame& frame, int index) noexcept -> std::optional<FVec3> {
+        if (const auto* color = frame.TestUserdata<LuaColor3>(index)) {
+            return FVec3 {color->r, color->g, color->b};
+        }
+        return ReadVector3(frame, index);
+    }
+
+    // ------------------------------------------------------------------------
+    // Vector3 & Color3 metamethods / constructors
+    // ------------------------------------------------------------------------
+
+    auto Vector3Dot(CallFrame& frame) -> int {
+        const auto* lhs = frame.TestUserdata<LuaVector3>(1);
+        const auto* rhs = frame.TestUserdata<LuaVector3>(2);
+        if (lhs == nullptr || rhs == nullptr) {
+            frame.PushDouble(0.0);
+        } else {
+            frame.PushFloat(lhs->x * rhs->x + lhs->y * rhs->y + lhs->z * rhs->z);
+        }
+        return 1;
+    }
+
+    auto Vector3Cross(CallFrame& frame) -> int {
+        const auto* lhs = frame.TestUserdata<LuaVector3>(1);
+        const auto* rhs = frame.TestUserdata<LuaVector3>(2);
+        if (lhs == nullptr || rhs == nullptr) {
+            frame.PushNil();
+            return 1;
+        }
+        PushVector3(
+            frame,
+            lhs->y * rhs->z - lhs->z * rhs->y,
+            lhs->z * rhs->x - lhs->x * rhs->z,
+            lhs->x * rhs->y - lhs->y * rhs->x
+        );
+        return 1;
+    }
+
+    auto Vector3Lerp(CallFrame& frame) -> int {
+        const auto* lhs   = frame.TestUserdata<LuaVector3>(1);
+        const auto* rhs   = frame.TestUserdata<LuaVector3>(2);
+        const float alpha = frame.ReadFloat(3).value_or(0.0f);
+        if (lhs == nullptr || rhs == nullptr) {
+            frame.PushNil();
+            return 1;
+        }
+        PushVector3(
+            frame,
+            lhs->x + (rhs->x - lhs->x) * alpha,
+            lhs->y + (rhs->y - lhs->y) * alpha,
+            lhs->z + (rhs->z - lhs->z) * alpha
+        );
+        return 1;
+    }
+
+    auto Vector3Index(CallFrame& frame) -> int {
+        const auto* value = frame.TestUserdata<LuaVector3>(1);
+        const auto  prop  = frame.ReadStringView(2);
+        if (value == nullptr || !prop) {
+            frame.PushNil();
+            return 1;
+        }
+        const std::string_view key = *prop;
+        if (key == "X" || key == "x") {
+            frame.PushFloat(value->x);
+        } else if (key == "Y" || key == "y") {
+            frame.PushFloat(value->y);
+        } else if (key == "Z" || key == "z") {
+            frame.PushFloat(value->z);
+        } else if (key == "Magnitude") {
+            frame.PushFloat(std::sqrt(value->x * value->x + value->y * value->y + value->z * value->z));
+        } else if (key == "Unit") {
+            const float mag = std::sqrt(value->x * value->x + value->y * value->y + value->z * value->z);
+            if (mag > 0.0f) {
+                PushVector3(frame, value->x / mag, value->y / mag, value->z / mag);
+            } else {
+                PushVector3(frame, 0.0f, 0.0f, 0.0f);
+            }
+        } else {
+            frame.PushNil();
+        }
+        return 1;
+    }
+
+    auto Vector3New(CallFrame& frame) -> int {
+        PushVector3(
+            frame,
+            frame.ReadFloat(1).value_or(0.0f),
+            frame.ReadFloat(2).value_or(0.0f),
+            frame.ReadFloat(3).value_or(0.0f)
+        );
+        return 1;
+    }
+
+    auto Vector3Add(CallFrame& frame) -> int {
+        const auto* lhs = frame.TestUserdata<LuaVector3>(1);
+        const auto* rhs = frame.TestUserdata<LuaVector3>(2);
+        if (lhs == nullptr || rhs == nullptr) {
+            frame.PushNil();
+            return 1;
+        }
+        PushVector3(frame, lhs->x + rhs->x, lhs->y + rhs->y, lhs->z + rhs->z);
+        return 1;
+    }
+
+    auto Vector3Sub(CallFrame& frame) -> int {
+        const auto* lhs = frame.TestUserdata<LuaVector3>(1);
+        const auto* rhs = frame.TestUserdata<LuaVector3>(2);
+        if (lhs == nullptr || rhs == nullptr) {
+            frame.PushNil();
+            return 1;
+        }
+        PushVector3(frame, lhs->x - rhs->x, lhs->y - rhs->y, lhs->z - rhs->z);
+        return 1;
+    }
+
+    auto Vector3Unm(CallFrame& frame) -> int {
+        const auto* value = frame.TestUserdata<LuaVector3>(1);
+        if (value == nullptr) {
+            frame.PushNil();
+            return 1;
+        }
+        PushVector3(frame, -value->x, -value->y, -value->z);
+        return 1;
+    }
+
+    auto Vector3Mul(CallFrame& frame) -> int {
+        const auto* lhs = frame.TestUserdata<LuaVector3>(1);
+        const auto* rhs = frame.TestUserdata<LuaVector3>(2);
+        if (lhs != nullptr) {
+            if (const auto scale = frame.ReadFloat(2)) {
+                PushVector3(frame, lhs->x * *scale, lhs->y * *scale, lhs->z * *scale);
+                return 1;
             }
         }
-        if (!alreadyAdded) result.values[result.count++] = *value;
+        if (rhs != nullptr) {
+            if (const auto scale = frame.ReadFloat(1)) {
+                PushVector3(frame, rhs->x * *scale, rhs->y * *scale, rhs->z * *scale);
+                return 1;
+            }
+        }
+        frame.PushNil();
+        return 1;
     }
-    return result;
-}
 
-template <typename E>
-auto ReadEnum(lua_State* state, int index, E& out) -> bool {
-    const std::string_view name = ReadEnumName(state, index);
-    if (!name.empty()) {
-        constexpr auto names = ZHLN::Reflect::EnumNames<E>();
-        for (const std::string_view candidateName: names) {
-            if (!EqualAsciiCaseInsensitive(name, candidateName)) continue;
-            const auto value = ZHLN::Reflect::StringToEnum<E>(candidateName);
-            if (!value) return false;
-            out = *value;
-            return true;
+    auto Vector3Div(CallFrame& frame) -> int {
+        const auto* lhs     = frame.TestUserdata<LuaVector3>(1);
+        const auto  divisor = frame.ReadFloat(2);
+        if (lhs == nullptr || !divisor || *divisor == 0.0f) {
+            frame.PushNil();
+            return 1;
+        }
+        PushVector3(frame, lhs->x / *divisor, lhs->y / *divisor, lhs->z / *divisor);
+        return 1;
+    }
+
+    auto Vector3Equal(CallFrame& frame) -> int {
+        const auto* lhs = frame.TestUserdata<LuaVector3>(1);
+        const auto* rhs = frame.TestUserdata<LuaVector3>(2);
+        frame.PushBool(lhs != nullptr && rhs != nullptr && lhs->x == rhs->x && lhs->y == rhs->y && lhs->z == rhs->z);
+        return 1;
+    }
+
+    auto IgnoreReadOnlyNewIndex(CallFrame& /*frame*/) -> int {
+        return 0;
+    }
+
+    auto Color3Lerp(CallFrame& frame) -> int {
+        const auto* lhs   = frame.TestUserdata<LuaColor3>(1);
+        const auto* rhs   = frame.TestUserdata<LuaColor3>(2);
+        const float alpha = frame.ReadFloat(3).value_or(0.0f);
+        if (lhs == nullptr || rhs == nullptr) {
+            frame.PushNil();
+            return 1;
+        }
+        PushColor3(
+            frame,
+            lhs->r + (rhs->r - lhs->r) * alpha,
+            lhs->g + (rhs->g - lhs->g) * alpha,
+            lhs->b + (rhs->b - lhs->b) * alpha
+        );
+        return 1;
+    }
+
+    auto Color3Index(CallFrame& frame) -> int {
+        const auto* value = frame.TestUserdata<LuaColor3>(1);
+        const auto  prop  = frame.ReadStringView(2);
+        if (value == nullptr || !prop) {
+            frame.PushNil();
+            return 1;
+        }
+        const std::string_view key = *prop;
+        if (key == "R" || key == "r") {
+            frame.PushFloat(value->r);
+        } else if (key == "G" || key == "g") {
+            frame.PushFloat(value->g);
+        } else if (key == "B" || key == "b") {
+            frame.PushFloat(value->b);
+        } else {
+            frame.PushNil();
+        }
+        return 1;
+    }
+
+    auto Color3New(CallFrame& frame) -> int {
+        PushColor3(
+            frame,
+            frame.ReadFloat(1).value_or(0.0f),
+            frame.ReadFloat(2).value_or(0.0f),
+            frame.ReadFloat(3).value_or(0.0f)
+        );
+        return 1;
+    }
+
+    auto Color3FromRGB(CallFrame& frame) -> int {
+        constexpr float kScale = 1.0f / 255.0f;
+        PushColor3(
+            frame,
+            frame.ReadFloat(1).value_or(0.0f) * kScale,
+            frame.ReadFloat(2).value_or(0.0f) * kScale,
+            frame.ReadFloat(3).value_or(0.0f) * kScale
+        );
+        return 1;
+    }
+
+    auto Color3Equal(CallFrame& frame) -> int {
+        const auto* lhs = frame.TestUserdata<LuaColor3>(1);
+        const auto* rhs = frame.TestUserdata<LuaColor3>(2);
+        frame.PushBool(lhs != nullptr && rhs != nullptr && lhs->r == rhs->r && lhs->g == rhs->g && lhs->b == rhs->b);
+        return 1;
+    }
+
+    // ------------------------------------------------------------------------
+    // Instance methods & metamethods
+    // ------------------------------------------------------------------------
+
+    auto MethodGetService(CallFrame& frame) -> int {
+        const InstancePtr self = ResolveLiveArgInstance(frame, 1);
+        const auto*       host = frame.HostContext<BindingHostState>();
+        const auto        name = frame.ReadStringView(2);
+        if (!self || !self->IsDataModelRoot() || host == nullptr || host->dataModel == nullptr || !name) {
+            frame.PushNil();
+            return 1;
+        }
+        PushInstance(frame, host->dataModel->GetService(*name));
+        return 1;
+    }
+
+    auto MethodGetChildren(CallFrame& frame) -> int {
+        const InstancePtr self = ResolveLiveArgInstance(frame, 1);
+        if (!self) {
+            frame.BeginTable(0, 0);
+            return 1;
+        }
+        PushInstanceArray(frame, self->GetChildren());
+        return 1;
+    }
+
+    auto MethodGetDescendants(CallFrame& frame) -> int {
+        const InstancePtr self = ResolveLiveArgInstance(frame, 1);
+        if (!self) {
+            frame.BeginTable(0, 0);
+            return 1;
+        }
+        PushInstanceArray(frame, self->GetDescendants());
+        return 1;
+    }
+
+    auto MethodGetAncestors(CallFrame& frame) -> int {
+        const InstancePtr self = ResolveLiveArgInstance(frame, 1);
+        if (!self) {
+            frame.BeginTable(0, 0);
+            return 1;
+        }
+        PushInstanceArray(frame, self->GetAncestors());
+        return 1;
+    }
+
+    auto MethodFindFirstChild(CallFrame& frame) -> int {
+        const InstancePtr self = ResolveLiveArgInstance(frame, 1);
+        const auto        name = frame.ReadStringView(2);
+        if (!self || !name) {
+            frame.PushNil();
+            return 1;
+        }
+        PushInstance(frame, self->FindFirstChild(*name, frame.ToBool(3)));
+        return 1;
+    }
+
+    auto MethodFindFirstChildOfClass(CallFrame& frame) -> int {
+        const InstancePtr self = ResolveLiveArgInstance(frame, 1);
+        const auto        name = frame.ReadStringView(2);
+        if (!self || !name) {
+            frame.PushNil();
+            return 1;
+        }
+        PushInstance(frame, self->FindFirstChildOfClass(*name, frame.ToBool(3)));
+        return 1;
+    }
+
+    auto MethodFindFirstChildWhichIsA(CallFrame& frame) -> int {
+        const InstancePtr self = ResolveLiveArgInstance(frame, 1);
+        const auto        name = frame.ReadStringView(2);
+        if (!self || !name) {
+            frame.PushNil();
+            return 1;
+        }
+        PushInstance(frame, self->FindFirstChildWhichIsA(*name, frame.ToBool(3)));
+        return 1;
+    }
+
+    auto MethodIsA(CallFrame& frame) -> int {
+        const InstancePtr self = ResolveLiveArgInstance(frame, 1);
+        const auto        name = frame.ReadStringView(2);
+        frame.PushBool(self && name && self->IsA(*name));
+        return 1;
+    }
+
+    auto MethodIsDescendantOf(CallFrame& frame) -> int {
+        const InstancePtr self     = ResolveLiveArgInstance(frame, 1);
+        const InstancePtr ancestor = ResolveLiveArgInstance(frame, 2);
+        frame.PushBool(self && ancestor && self->IsDescendantOf(ancestor));
+        return 1;
+    }
+
+    auto MethodGetFullName(CallFrame& frame) -> int {
+        const InstancePtr self = ResolveLiveArgInstance(frame, 1);
+        if (!self) {
+            frame.PushString("");
+            return 1;
+        }
+        frame.PushString(self->GetFullName());
+        return 1;
+    }
+
+    auto MethodDestroy(CallFrame& frame) -> int {
+        if (const InstancePtr self = ResolveLiveArgInstance(frame, 1)) {
+            self->Destroy();
+        }
+        return 0;
+    }
+
+    auto MethodPlay(CallFrame& frame) -> int {
+        if (const InstancePtr self = ResolveLiveArgInstance(frame, 1); self && self->IsA("Sound")) {
+            static_cast<Sound*>(self.GetPtr())->Play();
+        }
+        return 0;
+    }
+
+    auto MethodStop(CallFrame& frame) -> int {
+        if (const InstancePtr self = ResolveLiveArgInstance(frame, 1); self && self->IsA("Sound")) {
+            static_cast<Sound*>(self.GetPtr())->Stop();
+        }
+        return 0;
+    }
+
+    auto MethodGetPlayers(CallFrame& frame) -> int {
+        const InstancePtr self = ResolveLiveArgInstance(frame, 1);
+        if (!self || !self->IsA("PlayersService")) {
+            frame.BeginTable(0, 0);
+            return 1;
+        }
+        const auto players = static_cast<PlayersService*>(self.GetPtr())->GetPlayers();
+        frame.BeginTable(static_cast<int>(players.size()), 0);
+        int index = 1;
+        for (const auto& player: players) {
+            PushInstance(frame, player);
+            frame.SetArrayElementTop(index++);
+        }
+        return 1;
+    }
+
+    auto MethodFindPlayerByUserId(CallFrame& frame) -> int {
+        const InstancePtr self   = ResolveLiveArgInstance(frame, 1);
+        const auto        userId = frame.ReadUInt64(2);
+        if (!self || !self->IsA("PlayersService") || !userId) {
+            frame.PushNil();
+            return 1;
+        }
+        PushInstance(frame, static_cast<PlayersService*>(self.GetPtr())->FindPlayerByUserId(*userId));
+        return 1;
+    }
+
+    auto PushMethodFunction(CallFrame& frame, std::string_view name) noexcept -> bool {
+        constexpr std::array<MethodEntry, 15> kInstanceMethods = {{
+            {"GetService", &MethodGetService},
+            {"GetChildren", &MethodGetChildren},
+            {"GetDescendants", &MethodGetDescendants},
+            {"GetAncestors", &MethodGetAncestors},
+            {"FindFirstChild", &MethodFindFirstChild},
+            {"FindFirstChildOfClass", &MethodFindFirstChildOfClass},
+            {"FindFirstChildWhichIsA", &MethodFindFirstChildWhichIsA},
+            {"IsA", &MethodIsA},
+            {"IsDescendantOf", &MethodIsDescendantOf},
+            {"GetFullName", &MethodGetFullName},
+            {"Destroy", &MethodDestroy},
+            {"Play", &MethodPlay},
+            {"Stop", &MethodStop},
+            {"GetPlayers", &MethodGetPlayers},
+            {"FindPlayerByUserId", &MethodFindPlayerByUserId},
+        }};
+        for (const MethodEntry& entry: kInstanceMethods) {
+            if (entry.name == name) {
+                frame.PushFunction(entry.callback);
+                return true;
+            }
         }
         return false;
     }
-    if (!lua_isnumber(state, index)) return false;
-    const lua_Number number = lua_tonumber(state, index);
-    constexpr auto values = GetReflectedEnumValues<E>();
-    if (number < 0 || number >= static_cast<lua_Number>(values.count) || std::floor(number) != number) return false;
-    out = values.values[static_cast<size_t>(number)];
-    return true;
-}
 
-template <typename E>
-auto CanonicalEnumName(E value) -> std::string_view {
-    constexpr auto names = ZHLN::Reflect::EnumNames<E>();
-    for (const std::string_view name: names) {
-        const auto candidate = ZHLN::Reflect::StringToEnum<E>(name);
-        if (candidate && *candidate == value) return name;
+    void PushSignalProperty(CallFrame& frame, const Instance& instance, std::string_view property) noexcept {
+        if (property == "ChildAdded") {
+            PushSignal(frame, instance, SignalKind::ChildAdded);
+        } else if (property == "ChildRemoved") {
+            PushSignal(frame, instance, SignalKind::ChildRemoved);
+        } else if (property == "DescendantAdded") {
+            PushSignal(frame, instance, SignalKind::DescendantAdded);
+        } else if (property == "DescendantRemoved") {
+            PushSignal(frame, instance, SignalKind::DescendantRemoved);
+        } else if (property == "Destroying") {
+            PushSignal(frame, instance, SignalKind::Destroying);
+        } else if (property == "AncestryChanged") {
+            PushSignal(frame, instance, SignalKind::AncestryChanged);
+        } else if (property == "PropertyChanged") {
+            PushSignal(frame, instance, SignalKind::PropertyChanged);
+        } else if (property == "StateChanged" && instance.IsA("Humanoid")) {
+            PushSignal(frame, instance, SignalKind::HumanoidStateChanged);
+        } else if (property == "Ended" && instance.IsA("Sound")) {
+            PushSignal(frame, instance, SignalKind::SoundEnded);
+        } else {
+            frame.PushNil();
+        }
     }
-    return ZHLN::Reflect::EnumToString(value);
-}
 
-template <typename E>
-void PushEnum(lua_State* state, E value) {
-    const std::string_view name = CanonicalEnumName(value);
-    lua_pushlstring(state, name.data(), name.size());
-}
-
-auto ReadPartShape(lua_State* state, int index, PartShape& out) -> bool {
-    return ReadEnum(state, index, out);
-}
-
-auto ReadPartSurface(lua_State* state, int index, PartSurface& out) -> bool {
-    return ReadEnum(state, index, out);
-}
-
-auto ReadDecalFace(lua_State* state, int index, DecalFace& out) -> bool {
-    return ReadEnum(state, index, out);
-}
-
-auto ReadDecalWrapMode(lua_State* state, int index, DecalWrapMode& out) -> bool {
-    return ReadEnum(state, index, out);
-}
-
-auto ReadHumanoidState(lua_State* state, int index, HumanoidState& out) -> bool {
-    return ReadEnum(state, index, out);
-}
-
-void PushPartShape(lua_State* state, PartShape value) {
-    PushEnum(state, value);
-}
-
-void PushPartSurface(lua_State* state, PartSurface value) {
-    PushEnum(state, value);
-}
-
-void PushDecalFace(lua_State* state, DecalFace value) {
-    PushEnum(state, value);
-}
-
-void PushDecalWrapMode(lua_State* state, DecalWrapMode value) {
-    PushEnum(state, value);
-}
-
-void PushHumanoidState(lua_State* state, HumanoidState value) {
-    PushEnum(state, value);
-}
-
-void PushInstanceArray(lua_State* state, std::span<const InstancePtr> instances) {
-    lua_createtable(state, static_cast<int>(instances.size()), 0);
-    int index = 1;
-    for (const InstancePtr& instance: instances) {
-        PushInstance(state, instance);
-        lua_rawseti(state, -2, index++);
-    }
-}
-
-void PushSignalProperty(lua_State* state, const InstancePtr& instance, std::string_view property) {
-    if (property == "ChildAdded") PushSignal(state, instance, SignalKind::ChildAdded);
-    else if (property == "ChildRemoved") PushSignal(state, instance, SignalKind::ChildRemoved);
-    else if (property == "DescendantAdded") PushSignal(state, instance, SignalKind::DescendantAdded);
-    else if (property == "DescendantRemoved") PushSignal(state, instance, SignalKind::DescendantRemoved);
-    else if (property == "Destroying") PushSignal(state, instance, SignalKind::Destroying);
-    else if (property == "AncestryChanged") PushSignal(state, instance, SignalKind::AncestryChanged);
-    else if (property == "PropertyChanged") PushSignal(state, instance, SignalKind::PropertyChanged);
-    else if (property == "StateChanged" && instance->IsA("Humanoid")) PushSignal(state, instance, SignalKind::HumanoidStateChanged);
-    else if (property == "Ended" && instance->IsA("Sound")) PushSignal(state, instance, SignalKind::SoundEnded);
-    else lua_pushnil(state);
-}
-
-int InstanceGc(lua_State* state) {
-    if (auto* value = TestInstance(state, 1)) value->~LuaInstance();
-    return 0;
-}
-
-int Vector3Gc(lua_State* state) {
-    if (auto* value = TestVector3(state, 1)) value->~LuaVector3();
-    return 0;
-}
-
-int Color3Gc(lua_State* state) {
-    if (auto* value = TestColor3(state, 1)) value->~LuaColor3();
-    return 0;
-}
-
-int SignalGc(lua_State* state) {
-    if (auto* value = TestUserdata<LuaSignal>(state, 1, kSignalMetatable)) value->~LuaSignal();
-    return 0;
-}
-
-int ConnectionGc(lua_State* state) {
-    if (auto* value = TestUserdata<LuaConnectionUserdata>(state, 1, kConnectionMetatable)) value->~LuaConnectionUserdata();
-    return 0;
-}
-
-int ContextGc(lua_State* state) {
-    auto* value = TestUserdata<LuaContextUserdata>(state, 1, kContextMetatable);
-    if (value != nullptr && value->context != nullptr) {
-        delete value->context;
-        value->context = nullptr;
-    }
-    return 0;
-}
-
-int InstanceToString(lua_State* state) {
-    const auto* value = TestInstance(state, 1);
-    if (value == nullptr || !value->instance) {
-        lua_pushliteral(state, "Instance<expired>");
+    auto InstanceToString(CallFrame& frame) -> int {
+        const InstancePtr self = ResolveLiveArgInstance(frame, 1);
+        if (!self) {
+            frame.PushString("Instance<expired>");
+            return 1;
+        }
+        frame.PushString(self->GetFullName());
         return 1;
     }
-    const std::string fullName = value->instance->GetFullName();
-    lua_pushlstring(state, fullName.data(), fullName.size());
-    return 1;
-}
 
-int InstanceEqual(lua_State* state) {
-    const auto* lhs = TestInstance(state, 1);
-    const auto* rhs = TestInstance(state, 2);
-    lua_pushboolean(state, lhs != nullptr && rhs != nullptr && lhs->instance.GetPtr() == rhs->instance.GetPtr());
-    return 1;
-}
-
-int Vector3Dot(lua_State* state);
-int Vector3Cross(lua_State* state);
-int Vector3Lerp(lua_State* state);
-int Color3Lerp(lua_State* state);
-
-int Vector3Index(lua_State* state) {
-    const auto* value = TestVector3(state, 1);
-    if (value == nullptr || lua_type(state, 2) != LUA_TSTRING) {
-        lua_pushnil(state);
+    auto InstanceEqual(CallFrame& frame) -> int {
+        const auto* lhs = frame.TestUserdata<LuaInstanceRef>(1);
+        const auto* rhs = frame.TestUserdata<LuaInstanceRef>(2);
+        if (lhs == nullptr || rhs == nullptr) {
+            frame.PushBool(false);
+            return 1;
+        }
+        frame.PushBool(lhs->isRoot == rhs->isRoot && lhs->id == rhs->id);
         return 1;
     }
-    size_t length = 0;
-    const char* key = lua_tolstring(state, 2, &length);
-    const std::string_view property(key != nullptr ? key : "", length);
-    if (property == "X" || property == "x") lua_pushnumber(state, value->x);
-    else if (property == "Y" || property == "y") lua_pushnumber(state, value->y);
-    else if (property == "Z" || property == "z") lua_pushnumber(state, value->z);
-    else if (property == "Magnitude") lua_pushnumber(state, std::sqrt(value->x * value->x + value->y * value->y + value->z * value->z));
-    else if (property == "Unit") {
-        const float magnitude = std::sqrt(value->x * value->x + value->y * value->y + value->z * value->z);
-        if (magnitude > 0.0f) PushVector3(state, value->x / magnitude, value->y / magnitude, value->z / magnitude);
-        else PushVector3(state, 0.0f, 0.0f, 0.0f);
-    } else if (property == "Dot") lua_pushcfunction(state, Vector3Dot);
-    else if (property == "Cross") lua_pushcfunction(state, Vector3Cross);
-    else if (property == "Lerp") lua_pushcfunction(state, Vector3Lerp);
-    else lua_pushnil(state);
-    return 1;
-}
 
-int Vector3New(lua_State* state) {
-    const float x = static_cast<float>(lua_tonumber(state, 1));
-    const float y = static_cast<float>(lua_tonumber(state, 2));
-    const float z = static_cast<float>(lua_tonumber(state, 3));
-    PushVector3(state, x, y, z);
-    return 1;
-}
+    auto InstanceIndex(CallFrame& frame) -> int {
+        const auto* ref     = frame.TestUserdata<LuaInstanceRef>(1);
+        const auto  propOpt = frame.ReadStringView(2);
+        if (ref == nullptr || !propOpt) {
+            frame.PushNil();
+            return 1;
+        }
+        const std::string_view property = *propOpt;
+        const InstancePtr      instance = ResolveInstance(frame.HostContext<BindingHostState>(), *ref);
 
-int Vector3Add(lua_State* state) {
-    const auto* lhs = TestVector3(state, 1);
-    const auto* rhs = TestVector3(state, 2);
-    if (lhs == nullptr || rhs == nullptr) {
-        lua_pushnil(state);
-        return 1;
-    }
-    PushVector3(state, lhs->x + rhs->x, lhs->y + rhs->y, lhs->z + rhs->z);
-    return 1;
-}
+        if (!instance) {
+            if (property == "IsDestroyed") {
+                frame.PushBool(true);
+                return 1;
+            }
+            if (property == "InstanceId") {
+                frame.PushString(std::to_string(ref->id));
+                return 1;
+            }
+            // Allow harmless querying/destroying of tombstoned handles (`part:Destroy()`,
+            // `part:GetChildren()`, `part:IsA(...)`, `part:GetFullName()`).
+            if (PushMethodFunction(frame, property)) {
+                return 1;
+            }
+            frame.PushNil();
+            return 1;
+        }
 
-int Vector3Sub(lua_State* state) {
-    const auto* lhs = TestVector3(state, 1);
-    const auto* rhs = TestVector3(state, 2);
-    if (lhs == nullptr || rhs == nullptr) {
-        lua_pushnil(state);
-        return 1;
-    }
-    PushVector3(state, lhs->x - rhs->x, lhs->y - rhs->y, lhs->z - rhs->z);
-    return 1;
-}
-
-int Vector3Unm(lua_State* state) {
-    const auto* value = TestVector3(state, 1);
-    if (value == nullptr) {
-        lua_pushnil(state);
-        return 1;
-    }
-    PushVector3(state, -value->x, -value->y, -value->z);
-    return 1;
-}
-
-int Vector3Mul(lua_State* state) {
-    const auto* lhs = TestVector3(state, 1);
-    const auto* rhs = TestVector3(state, 2);
-    if (lhs != nullptr && lua_isnumber(state, 2)) {
-        const float scale = static_cast<float>(lua_tonumber(state, 2));
-        PushVector3(state, lhs->x * scale, lhs->y * scale, lhs->z * scale);
-    } else if (rhs != nullptr && lua_isnumber(state, 1)) {
-        const float scale = static_cast<float>(lua_tonumber(state, 1));
-        PushVector3(state, rhs->x * scale, rhs->y * scale, rhs->z * scale);
-    } else {
-        lua_pushnil(state);
-    }
-    return 1;
-}
-
-int Vector3Div(lua_State* state) {
-    const auto* lhs = TestVector3(state, 1);
-    if (lhs == nullptr || !lua_isnumber(state, 2)) {
-        lua_pushnil(state);
-        return 1;
-    }
-    const float divisor = static_cast<float>(lua_tonumber(state, 2));
-    if (divisor == 0.0f) {
-        lua_pushnil(state);
-        return 1;
-    }
-    PushVector3(state, lhs->x / divisor, lhs->y / divisor, lhs->z / divisor);
-    return 1;
-}
-
-int Vector3Dot(lua_State* state) {
-    const auto* lhs = TestVector3(state, 1);
-    const auto* rhs = TestVector3(state, 2);
-    if (lhs == nullptr || rhs == nullptr) lua_pushnumber(state, 0.0);
-    else lua_pushnumber(state, lhs->x * rhs->x + lhs->y * rhs->y + lhs->z * rhs->z);
-    return 1;
-}
-
-int Vector3Cross(lua_State* state) {
-    const auto* lhs = TestVector3(state, 1);
-    const auto* rhs = TestVector3(state, 2);
-    if (lhs == nullptr || rhs == nullptr) {
-        lua_pushnil(state);
-        return 1;
-    }
-    PushVector3(state,
-        lhs->y * rhs->z - lhs->z * rhs->y,
-        lhs->z * rhs->x - lhs->x * rhs->z,
-        lhs->x * rhs->y - lhs->y * rhs->x);
-    return 1;
-}
-
-int Vector3Lerp(lua_State* state) {
-    const auto* lhs = TestVector3(state, 1);
-    const auto* rhs = TestVector3(state, 2);
-    const float alpha = static_cast<float>(lua_tonumber(state, 3));
-    if (lhs == nullptr || rhs == nullptr) {
-        lua_pushnil(state);
-        return 1;
-    }
-    PushVector3(state,
-        lhs->x + (rhs->x - lhs->x) * alpha,
-        lhs->y + (rhs->y - lhs->y) * alpha,
-        lhs->z + (rhs->z - lhs->z) * alpha);
-    return 1;
-}
-
-int Vector3Equal(lua_State* state) {
-    const auto* lhs = TestVector3(state, 1);
-    const auto* rhs = TestVector3(state, 2);
-    lua_pushboolean(state, lhs != nullptr && rhs != nullptr && lhs->x == rhs->x && lhs->y == rhs->y && lhs->z == rhs->z);
-    return 1;
-}
-
-int Color3Index(lua_State* state) {
-    const auto* value = TestColor3(state, 1);
-    if (value == nullptr || lua_type(state, 2) != LUA_TSTRING) {
-        lua_pushnil(state);
-        return 1;
-    }
-    size_t length = 0;
-    const char* key = lua_tolstring(state, 2, &length);
-    const std::string_view property(key != nullptr ? key : "", length);
-    if (property == "R" || property == "r") lua_pushnumber(state, value->r);
-    else if (property == "G" || property == "g") lua_pushnumber(state, value->g);
-    else if (property == "B" || property == "b") lua_pushnumber(state, value->b);
-    else if (property == "Lerp") lua_pushcfunction(state, Color3Lerp);
-    else lua_pushnil(state);
-    return 1;
-}
-
-int Color3New(lua_State* state) {
-    PushColor3(state,
-        static_cast<float>(lua_tonumber(state, 1)),
-        static_cast<float>(lua_tonumber(state, 2)),
-        static_cast<float>(lua_tonumber(state, 3)));
-    return 1;
-}
-
-int Color3FromRGB(lua_State* state) {
-    constexpr float scale = 1.0f / 255.0f;
-    PushColor3(state,
-        static_cast<float>(lua_tonumber(state, 1)) * scale,
-        static_cast<float>(lua_tonumber(state, 2)) * scale,
-        static_cast<float>(lua_tonumber(state, 3)) * scale);
-    return 1;
-}
-
-int Color3Lerp(lua_State* state) {
-    const auto* lhs = TestColor3(state, 1);
-    const auto* rhs = TestColor3(state, 2);
-    const float alpha = static_cast<float>(lua_tonumber(state, 3));
-    if (lhs == nullptr || rhs == nullptr) {
-        lua_pushnil(state);
-        return 1;
-    }
-    PushColor3(state,
-        lhs->r + (rhs->r - lhs->r) * alpha,
-        lhs->g + (rhs->g - lhs->g) * alpha,
-        lhs->b + (rhs->b - lhs->b) * alpha);
-    return 1;
-}
-
-int Color3Equal(lua_State* state) {
-    const auto* lhs = TestColor3(state, 1);
-    const auto* rhs = TestColor3(state, 2);
-    lua_pushboolean(state, lhs != nullptr && rhs != nullptr && lhs->r == rhs->r && lhs->g == rhs->g && lhs->b == rhs->b);
-    return 1;
-}
-
-int MethodGetService(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self == nullptr || !self->instance || !self->instance->IsDataModelRoot()) {
-        lua_pushnil(state);
-        return 1;
-    }
-    LuaBindingContext* context = GetBindingContext(state);
-    if (context == nullptr || context->dataModel == nullptr || lua_type(state, 2) != LUA_TSTRING) {
-        lua_pushnil(state);
-        return 1;
-    }
-    size_t length = 0;
-    const char* name = lua_tolstring(state, 2, &length);
-    PushInstance(state, context->dataModel->GetService(std::string_view(name != nullptr ? name : "", length)));
-    return 1;
-}
-
-int MethodGetChildren(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self == nullptr || !self->instance) {
-        lua_newtable(state);
-        return 1;
-    }
-    PushInstanceArray(state, self->instance->GetChildren());
-    return 1;
-}
-
-int MethodGetDescendants(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self == nullptr || !self->instance) {
-        lua_newtable(state);
-        return 1;
-    }
-    PushInstanceArray(state, self->instance->GetDescendants());
-    return 1;
-}
-
-int MethodGetAncestors(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self == nullptr || !self->instance) {
-        lua_newtable(state);
-        return 1;
-    }
-    PushInstanceArray(state, self->instance->GetAncestors());
-    return 1;
-}
-
-int MethodFindFirstChild(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self == nullptr || !self->instance || lua_type(state, 2) != LUA_TSTRING) {
-        lua_pushnil(state);
-        return 1;
-    }
-    size_t length = 0;
-    const char* name = lua_tolstring(state, 2, &length);
-    const bool recursive = lua_toboolean(state, 3) != 0;
-    PushInstance(state, self->instance->FindFirstChild(std::string_view(name != nullptr ? name : "", length), recursive));
-    return 1;
-}
-
-int MethodFindFirstChildOfClass(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self == nullptr || !self->instance || lua_type(state, 2) != LUA_TSTRING) {
-        lua_pushnil(state);
-        return 1;
-    }
-    size_t length = 0;
-    const char* name = lua_tolstring(state, 2, &length);
-    const bool recursive = lua_toboolean(state, 3) != 0;
-    PushInstance(state, self->instance->FindFirstChildOfClass(std::string_view(name != nullptr ? name : "", length), recursive));
-    return 1;
-}
-
-int MethodFindFirstChildWhichIsA(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self == nullptr || !self->instance || lua_type(state, 2) != LUA_TSTRING) {
-        lua_pushnil(state);
-        return 1;
-    }
-    size_t length = 0;
-    const char* name = lua_tolstring(state, 2, &length);
-    const bool recursive = lua_toboolean(state, 3) != 0;
-    PushInstance(state, self->instance->FindFirstChildWhichIsA(std::string_view(name != nullptr ? name : "", length), recursive));
-    return 1;
-}
-
-int MethodIsA(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self == nullptr || !self->instance || lua_type(state, 2) != LUA_TSTRING) {
-        lua_pushboolean(state, false);
-        return 1;
-    }
-    size_t length = 0;
-    const char* name = lua_tolstring(state, 2, &length);
-    lua_pushboolean(state, self->instance->IsA(std::string_view(name != nullptr ? name : "", length)));
-    return 1;
-}
-
-int MethodIsDescendantOf(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    const auto* ancestor = TestInstance(state, 2);
-    lua_pushboolean(state,
-        self != nullptr && self->instance && ancestor != nullptr && ancestor->instance &&
-        self->instance->IsDescendantOf(ancestor->instance));
-    return 1;
-}
-
-int MethodGetFullName(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self == nullptr || !self->instance) {
-        lua_pushliteral(state, "");
-        return 1;
-    }
-    const std::string fullName = self->instance->GetFullName();
-    lua_pushlstring(state, fullName.data(), fullName.size());
-    return 1;
-}
-
-int MethodDestroy(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self != nullptr && self->instance) self->instance->Destroy();
-    return 0;
-}
-
-int MethodPlay(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self != nullptr && self->instance && self->instance->IsA("Sound")) {
-        static_cast<Sound*>(self->instance.GetPtr())->Play();
-    }
-    return 0;
-}
-
-int MethodStop(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self != nullptr && self->instance && self->instance->IsA("Sound")) {
-        static_cast<Sound*>(self->instance.GetPtr())->Stop();
-    }
-    return 0;
-}
-
-int MethodGetPlayers(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self == nullptr || !self->instance || !self->instance->IsA("PlayersService")) {
-        lua_newtable(state);
-        return 1;
-    }
-    const auto players = static_cast<PlayersService*>(self->instance.GetPtr())->GetPlayers();
-    lua_createtable(state, static_cast<int>(players.size()), 0);
-    int index = 1;
-    for (const auto& player: players) {
-        PushInstance(state, player);
-        lua_rawseti(state, -2, index++);
-    }
-    return 1;
-}
-
-int MethodFindPlayerByUserId(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self == nullptr || !self->instance || !self->instance->IsA("PlayersService") || !lua_isnumber(state, 2)) {
-        lua_pushnil(state);
-        return 1;
-    }
-    const double number = lua_tonumber(state, 2);
-    if (number < 0.0) {
-        lua_pushnil(state);
-        return 1;
-    }
-    PushInstance(state, static_cast<PlayersService*>(self->instance.GetPtr())->FindPlayerByUserId(static_cast<uint64_t>(number)));
-    return 1;
-}
-
-void PushMethod(lua_State* state, std::string_view name) {
-    if (name == "GetService") lua_pushcfunction(state, MethodGetService);
-    else if (name == "GetChildren") lua_pushcfunction(state, MethodGetChildren);
-    else if (name == "GetDescendants") lua_pushcfunction(state, MethodGetDescendants);
-    else if (name == "GetAncestors") lua_pushcfunction(state, MethodGetAncestors);
-    else if (name == "FindFirstChild") lua_pushcfunction(state, MethodFindFirstChild);
-    else if (name == "FindFirstChildOfClass") lua_pushcfunction(state, MethodFindFirstChildOfClass);
-    else if (name == "FindFirstChildWhichIsA") lua_pushcfunction(state, MethodFindFirstChildWhichIsA);
-    else if (name == "IsA") lua_pushcfunction(state, MethodIsA);
-    else if (name == "IsDescendantOf") lua_pushcfunction(state, MethodIsDescendantOf);
-    else if (name == "GetFullName") lua_pushcfunction(state, MethodGetFullName);
-    else if (name == "Destroy") lua_pushcfunction(state, MethodDestroy);
-    else if (name == "Play") lua_pushcfunction(state, MethodPlay);
-    else if (name == "Stop") lua_pushcfunction(state, MethodStop);
-    else if (name == "GetPlayers") lua_pushcfunction(state, MethodGetPlayers);
-    else if (name == "FindPlayerByUserId") lua_pushcfunction(state, MethodFindPlayerByUserId);
-    else lua_pushnil(state);
-}
-
-int InstanceIndex(lua_State* state) {
-    const auto* value = TestInstance(state, 1);
-    if (value == nullptr || !value->instance || lua_type(state, 2) != LUA_TSTRING) {
-        lua_pushnil(state);
-        return 1;
-    }
-    size_t length = 0;
-    const char* key = lua_tolstring(state, 2, &length);
-    const std::string_view property(key != nullptr ? key : "", length);
-    const InstancePtr& instance = value->instance;
-
-    if (property == "Name") lua_pushlstring(state, instance->Name().data(), instance->Name().size());
-    else if (property == "ClassName") lua_pushlstring(state, instance->ClassName().data(), instance->ClassName().size());
-    else if (property == "Parent") PushInstance(state, instance->Parent());
-    else if (property == "InstanceId") {
-        const std::string id = std::to_string(instance->Id());
-        lua_pushlstring(state, id.data(), id.size());
-    } else if (property == "IsDestroyed") lua_pushboolean(state, instance->IsDestroyed());
-    else if (property == "ChildAdded" || property == "ChildRemoved" || property == "DescendantAdded" ||
-             property == "DescendantRemoved" || property == "Destroying" || property == "AncestryChanged" ||
-             property == "PropertyChanged" || property == "StateChanged" || property == "Ended") {
-        PushSignalProperty(state, instance, property);
-    } else if (instance->IsA("BasePart") && property == "Position") PushVector3(state, static_cast<BasePart*>(instance.GetPtr())->Position());
-    else if (instance->IsA("BasePart") && property == "Rotation") PushVector3(state, static_cast<BasePart*>(instance.GetPtr())->Rotation());
-    else if (instance->IsA("BasePart") && property == "Size") PushVector3(state, static_cast<BasePart*>(instance.GetPtr())->Size());
-    else if (instance->IsA("BasePart") && property == "Color") {
-        const FVec3& color = static_cast<BasePart*>(instance.GetPtr())->Color();
-        PushColor3(state, color.x, color.y, color.z);
-    } else if (instance->IsA("BasePart") && property == "Anchored") lua_pushboolean(state, static_cast<BasePart*>(instance.GetPtr())->Anchored());
-    else if (instance->IsA("BasePart") && property == "CanCollide") lua_pushboolean(state, static_cast<BasePart*>(instance.GetPtr())->CanCollide());
-    else if (instance->IsA("BasePart") && property == "Transparency") lua_pushnumber(state, static_cast<BasePart*>(instance.GetPtr())->Transparency());
-    else if (instance->IsA("BasePart") && property == "NetworkOwner") PushInstance(state, static_cast<BasePart*>(instance.GetPtr())->NetworkOwner());
-    else if (instance->IsA("Part") && property == "Shape") PushPartShape(state, static_cast<Part*>(instance.GetPtr())->Shape());
-    else if (instance->IsA("Part") && property == "FrontSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->FrontSurface());
-    else if (instance->IsA("Part") && property == "BackSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->BackSurface());
-    else if (instance->IsA("Part") && property == "TopSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->TopSurface());
-    else if (instance->IsA("Part") && property == "BottomSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->BottomSurface());
-    else if (instance->IsA("Part") && property == "LeftSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->LeftSurface());
-    else if (instance->IsA("Part") && property == "RightSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->RightSurface());
-    else if (instance->IsA("MeshPart") && property == "MeshId") {
-        const std::string_view meshId = static_cast<MeshPart*>(instance.GetPtr())->MeshId();
-        lua_pushlstring(state, meshId.data(), meshId.size());
-    } else if (instance->IsA("SpawnPoint") && property == "Position") PushVector3(state, static_cast<SpawnPoint*>(instance.GetPtr())->Position());
-    else if (instance->IsA("SpawnPoint") && property == "Rotation") PushVector3(state, static_cast<SpawnPoint*>(instance.GetPtr())->Rotation());
-    else if (instance->IsA("Model") && property == "PrimaryPart") PushInstance(state, static_cast<Model*>(instance.GetPtr())->PrimaryPart());
-    else if (instance->IsA("Humanoid") && property == "WalkSpeed") lua_pushnumber(state, static_cast<Humanoid*>(instance.GetPtr())->WalkSpeed());
-    else if (instance->IsA("Humanoid") && property == "JumpPower") lua_pushnumber(state, static_cast<Humanoid*>(instance.GetPtr())->JumpPower());
-    else if (instance->IsA("Humanoid") && property == "Health") lua_pushnumber(state, static_cast<Humanoid*>(instance.GetPtr())->Health());
-    else if (instance->IsA("Humanoid") && property == "MaxHealth") lua_pushnumber(state, static_cast<Humanoid*>(instance.GetPtr())->MaxHealth());
-    else if (instance->IsA("Humanoid") && property == "RootPart") PushInstance(state, static_cast<Humanoid*>(instance.GetPtr())->RootPart());
-    else if (instance->IsA("Humanoid") && property == "State") PushHumanoidState(state, static_cast<Humanoid*>(instance.GetPtr())->State());
-    else if (instance->IsA("Player") && property == "UserId") lua_pushnumber(state, static_cast<lua_Number>(static_cast<Player*>(instance.GetPtr())->UserId()));
-    else if (instance->IsA("Player") && property == "Character") PushInstance(state, static_cast<Player*>(instance.GetPtr())->Character());
-    else if (instance->IsA("PlayersService") && property == "LocalPlayer") PushInstance(state, static_cast<PlayersService*>(instance.GetPtr())->LocalPlayer());
-    else if (instance->IsA("WorkspaceService") && property == "CurrentCamera") PushInstance(state, static_cast<WorkspaceService*>(instance.GetPtr())->CurrentCamera());
-    else if (instance->IsA("PhysicsService") && property == "ServerAuthority") lua_pushboolean(state, static_cast<PhysicsService*>(instance.GetPtr())->ServerAuthority());
-    else if (instance->IsA("Sound") && property == "SoundId") {
-        const std::string_view soundId = static_cast<Sound*>(instance.GetPtr())->SoundId();
-        lua_pushlstring(state, soundId.data(), soundId.size());
-    } else if (instance->IsA("Sound") && property == "Volume") lua_pushnumber(state, static_cast<Sound*>(instance.GetPtr())->Volume());
-    else if (instance->IsA("Sound") && property == "Loops") lua_pushboolean(state, static_cast<Sound*>(instance.GetPtr())->Loops());
-    else if (instance->IsA("Sound") && property == "Playing") lua_pushboolean(state, static_cast<Sound*>(instance.GetPtr())->Playing());
-    else if (instance->IsA("Decal") && property == "TextureId") {
-        const std::string_view textureID = static_cast<Decal*>(instance.GetPtr())->GetTextureID();
-        lua_pushlstring(state, textureID.data(), textureID.size());
-    } else if (instance->IsA("Decal") && property == "Color") {
-        const FVec3& color = static_cast<Decal*>(instance.GetPtr())->Color();
-        PushColor3(state, color.x, color.y, color.z);
-    } else if (instance->IsA("Decal") && property == "Face") PushDecalFace(state, static_cast<Decal*>(instance.GetPtr())->Face());
-    else if (instance->IsA("Decal") && property == "WrapMode") PushDecalWrapMode(state, static_cast<Decal*>(instance.GetPtr())->WrapMode());
-    else if (instance->IsA("Decal") && property == "Scale") lua_pushnumber(state, static_cast<Decal*>(instance.GetPtr())->Scale());
-    else if (instance->IsA("Decal") && property == "Transparency") lua_pushnumber(state, static_cast<Decal*>(instance.GetPtr())->Transparency());
-    else if (instance->IsA("Motor") && property == "Part1") PushInstance(state, static_cast<Motor*>(instance.GetPtr())->Part1());
-    else if (instance->IsA("Motor") && property == "Part2") PushInstance(state, static_cast<Motor*>(instance.GetPtr())->Part2());
-    else if (instance->IsA("Motor") && property == "Offset1") PushVector3(state, static_cast<Motor*>(instance.GetPtr())->Offset1());
-    else if (instance->IsA("Motor") && property == "Offset2") PushVector3(state, static_cast<Motor*>(instance.GetPtr())->Offset2());
-    else if (instance->IsA("Motor") && property == "CurrentAngle") lua_pushnumber(state, static_cast<Motor*>(instance.GetPtr())->CurrentAngle());
-    else if (instance->IsA("Motor") && property == "DesiredAngle") lua_pushnumber(state, static_cast<Motor*>(instance.GetPtr())->DesiredAngle());
-    else if (instance->IsA("Motor") && property == "MaxVelocity") lua_pushnumber(state, static_cast<Motor*>(instance.GetPtr())->MaxVelocity());
-    else {
-        PushMethod(state, property);
-        if (!lua_isnil(state, -1)) return 1;
-        lua_pop(state, 1);
-
-        if (instance->IsDataModelRoot()) {
-            if (LuaBindingContext* context = GetBindingContext(state); context != nullptr && context->dataModel != nullptr) {
-                if (const auto service = context->dataModel->GetService(property)) {
-                    PushInstance(state, service);
-                    return 1;
+        if (property == "Name") {
+            frame.PushString(instance->Name());
+        } else if (property == "ClassName") {
+            frame.PushString(instance->ClassName());
+        } else if (property == "Parent") {
+            PushInstance(frame, instance->Parent());
+        } else if (property == "InstanceId") {
+            frame.PushString(std::to_string(instance->Id()));
+        } else if (property == "IsDestroyed") {
+            frame.PushBool(instance->IsDestroyed());
+        } else if (
+            property == "ChildAdded" || property == "ChildRemoved" || property == "DescendantAdded" ||
+            property == "DescendantRemoved" || property == "Destroying" || property == "AncestryChanged" ||
+            property == "PropertyChanged" || property == "StateChanged" || property == "Ended"
+        ) {
+            PushSignalProperty(frame, *instance, property);
+        } else if (instance->IsA("BasePart") && property == "Position") {
+            PushVector3(frame, static_cast<BasePart*>(instance.GetPtr())->Position());
+        } else if (instance->IsA("BasePart") && property == "Rotation") {
+            PushVector3(frame, static_cast<BasePart*>(instance.GetPtr())->Rotation());
+        } else if (instance->IsA("BasePart") && property == "Size") {
+            PushVector3(frame, static_cast<BasePart*>(instance.GetPtr())->Size());
+        } else if (instance->IsA("BasePart") && property == "Color") {
+            const FVec3& color = static_cast<BasePart*>(instance.GetPtr())->Color();
+            PushColor3(frame, color.x, color.y, color.z);
+        } else if (instance->IsA("BasePart") && property == "Anchored") {
+            frame.PushBool(static_cast<BasePart*>(instance.GetPtr())->Anchored());
+        } else if (instance->IsA("BasePart") && property == "CanCollide") {
+            frame.PushBool(static_cast<BasePart*>(instance.GetPtr())->CanCollide());
+        } else if (instance->IsA("BasePart") && property == "Transparency") {
+            frame.PushFloat(static_cast<BasePart*>(instance.GetPtr())->Transparency());
+        } else if (instance->IsA("BasePart") && property == "NetworkOwner") {
+            PushInstance(frame, static_cast<BasePart*>(instance.GetPtr())->NetworkOwner());
+        } else if (instance->IsA("Part") && property == "Shape") {
+            frame.PushEnum(static_cast<Part*>(instance.GetPtr())->Shape());
+        } else if (instance->IsA("Part") && property == "FrontSurface") {
+            frame.PushEnum(static_cast<Part*>(instance.GetPtr())->FrontSurface());
+        } else if (instance->IsA("Part") && property == "BackSurface") {
+            frame.PushEnum(static_cast<Part*>(instance.GetPtr())->BackSurface());
+        } else if (instance->IsA("Part") && property == "TopSurface") {
+            frame.PushEnum(static_cast<Part*>(instance.GetPtr())->TopSurface());
+        } else if (instance->IsA("Part") && property == "BottomSurface") {
+            frame.PushEnum(static_cast<Part*>(instance.GetPtr())->BottomSurface());
+        } else if (instance->IsA("Part") && property == "LeftSurface") {
+            frame.PushEnum(static_cast<Part*>(instance.GetPtr())->LeftSurface());
+        } else if (instance->IsA("Part") && property == "RightSurface") {
+            frame.PushEnum(static_cast<Part*>(instance.GetPtr())->RightSurface());
+        } else if (instance->IsA("MeshPart") && property == "MeshId") {
+            frame.PushString(static_cast<MeshPart*>(instance.GetPtr())->MeshId());
+        } else if (instance->IsA("SpawnPoint") && property == "Position") {
+            PushVector3(frame, static_cast<SpawnPoint*>(instance.GetPtr())->Position());
+        } else if (instance->IsA("SpawnPoint") && property == "Rotation") {
+            PushVector3(frame, static_cast<SpawnPoint*>(instance.GetPtr())->Rotation());
+        } else if (instance->IsA("Model") && property == "PrimaryPart") {
+            PushInstance(frame, static_cast<Model*>(instance.GetPtr())->PrimaryPart());
+        } else if (instance->IsA("Humanoid") && property == "WalkSpeed") {
+            frame.PushFloat(static_cast<Humanoid*>(instance.GetPtr())->WalkSpeed());
+        } else if (instance->IsA("Humanoid") && property == "JumpPower") {
+            frame.PushFloat(static_cast<Humanoid*>(instance.GetPtr())->JumpPower());
+        } else if (instance->IsA("Humanoid") && property == "Health") {
+            frame.PushFloat(static_cast<Humanoid*>(instance.GetPtr())->Health());
+        } else if (instance->IsA("Humanoid") && property == "MaxHealth") {
+            frame.PushFloat(static_cast<Humanoid*>(instance.GetPtr())->MaxHealth());
+        } else if (instance->IsA("Humanoid") && property == "RootPart") {
+            PushInstance(frame, static_cast<Humanoid*>(instance.GetPtr())->RootPart());
+        } else if (instance->IsA("Humanoid") && property == "State") {
+            frame.PushEnum(static_cast<Humanoid*>(instance.GetPtr())->State());
+        } else if (instance->IsA("Player") && property == "UserId") {
+            frame.PushUInt64(static_cast<Player*>(instance.GetPtr())->UserId());
+        } else if (instance->IsA("Player") && property == "Character") {
+            PushInstance(frame, static_cast<Player*>(instance.GetPtr())->Character());
+        } else if (instance->IsA("PlayersService") && property == "LocalPlayer") {
+            PushInstance(frame, static_cast<PlayersService*>(instance.GetPtr())->LocalPlayer());
+        } else if (instance->IsA("WorkspaceService") && property == "CurrentCamera") {
+            PushInstance(frame, static_cast<WorkspaceService*>(instance.GetPtr())->CurrentCamera());
+        } else if (instance->IsA("PhysicsService") && property == "ServerAuthority") {
+            frame.PushBool(static_cast<PhysicsService*>(instance.GetPtr())->ServerAuthority());
+        } else if (instance->IsA("Sound") && property == "SoundId") {
+            frame.PushString(static_cast<Sound*>(instance.GetPtr())->SoundId());
+        } else if (instance->IsA("Sound") && property == "Volume") {
+            frame.PushFloat(static_cast<Sound*>(instance.GetPtr())->Volume());
+        } else if (instance->IsA("Sound") && property == "Loops") {
+            frame.PushBool(static_cast<Sound*>(instance.GetPtr())->Loops());
+        } else if (instance->IsA("Sound") && property == "Playing") {
+            frame.PushBool(static_cast<Sound*>(instance.GetPtr())->Playing());
+        } else if (instance->IsA("Decal") && property == "TextureId") {
+            frame.PushString(static_cast<Decal*>(instance.GetPtr())->GetTextureID());
+        } else if (instance->IsA("Decal") && property == "Color") {
+            const FVec3& color = static_cast<Decal*>(instance.GetPtr())->Color();
+            PushColor3(frame, color.x, color.y, color.z);
+        } else if (instance->IsA("Decal") && property == "Face") {
+            frame.PushEnum(static_cast<Decal*>(instance.GetPtr())->Face());
+        } else if (instance->IsA("Decal") && property == "WrapMode") {
+            frame.PushEnum(static_cast<Decal*>(instance.GetPtr())->WrapMode());
+        } else if (instance->IsA("Decal") && property == "Scale") {
+            frame.PushFloat(static_cast<Decal*>(instance.GetPtr())->Scale());
+        } else if (instance->IsA("Decal") && property == "Transparency") {
+            frame.PushFloat(static_cast<Decal*>(instance.GetPtr())->Transparency());
+        } else if (instance->IsA("Motor") && property == "Part1") {
+            PushInstance(frame, static_cast<Motor*>(instance.GetPtr())->Part1());
+        } else if (instance->IsA("Motor") && property == "Part2") {
+            PushInstance(frame, static_cast<Motor*>(instance.GetPtr())->Part2());
+        } else if (instance->IsA("Motor") && property == "Offset1") {
+            PushVector3(frame, static_cast<Motor*>(instance.GetPtr())->Offset1());
+        } else if (instance->IsA("Motor") && property == "Offset2") {
+            PushVector3(frame, static_cast<Motor*>(instance.GetPtr())->Offset2());
+        } else if (instance->IsA("Motor") && property == "CurrentAngle") {
+            frame.PushFloat(static_cast<Motor*>(instance.GetPtr())->CurrentAngle());
+        } else if (instance->IsA("Motor") && property == "DesiredAngle") {
+            frame.PushFloat(static_cast<Motor*>(instance.GetPtr())->DesiredAngle());
+        } else if (instance->IsA("Motor") && property == "MaxVelocity") {
+            frame.PushFloat(static_cast<Motor*>(instance.GetPtr())->MaxVelocity());
+        } else {
+            if (PushMethodFunction(frame, property)) {
+                return 1;
+            }
+            if (instance->IsDataModelRoot()) {
+                if (const auto* host = frame.HostContext<BindingHostState>(); host != nullptr && host->dataModel != nullptr) {
+                    if (const auto service = host->dataModel->GetService(property)) {
+                        PushInstance(frame, service);
+                        return 1;
+                    }
                 }
             }
+            PushInstance(frame, instance->FindFirstChild(property));
         }
-        PushInstance(state, instance->FindFirstChild(property));
+        return 1;
     }
-    return 1;
-}
 
-int InstanceNewIndex(lua_State* state) {
-    const auto* self = TestInstance(state, 1);
-    if (self == nullptr || !self->instance || lua_type(state, 2) != LUA_TSTRING) return 0;
-    size_t length = 0;
-    const char* key = lua_tolstring(state, 2, &length);
-    const std::string_view property(key != nullptr ? key : "", length);
-    Instance& instance = *self->instance;
+    auto InstanceNewIndex(CallFrame& frame) -> int {
+        const InstancePtr instancePtr = ResolveLiveArgInstance(frame, 1);
+        const auto        propOpt     = frame.ReadStringView(2);
+        if (!instancePtr || !propOpt) {
+            return 0;
+        }
+        const std::string_view property = *propOpt;
+        Instance&              instance = *instancePtr;
 
-    if (property == "Name") {
-        if (auto name = ReadString(state, 3)) instance.SetName(std::move(*name));
-    } else if (property == "Parent") {
-        if (lua_isnil(state, 3)) {
-            [[maybe_unused]] const auto result = instance.SetParent({});
+        if (property == "Name") {
+            if (auto name = frame.ReadString(3)) {
+                instance.SetName(std::move(*name));
+            }
+        } else if (property == "Parent") {
+            auto* host = frame.HostContext<BindingHostState>();
+            if (frame.IsNilOrNone(3)) {
+                if (host != nullptr) {
+                    host->TrackIfUnparented(instancePtr);
+                }
+                [[maybe_unused]] const auto result = instance.SetParent({});
+                if (host != nullptr) {
+                    host->TrackIfUnparented(instancePtr);
+                }
+            } else if (const InstancePtr parent = ResolveLiveArgInstance(frame, 3)) {
+                if (instance.SetParent(parent) && host != nullptr) {
+                    host->PruneUnparentedPool();
+                }
+            }
+        } else if (instance.IsA("BasePart") && property == "Position") {
+            if (const auto vec = ReadVector3(frame, 3)) {
+                static_cast<BasePart&>(instance).SetPosition(*vec);
+            }
+        } else if (instance.IsA("BasePart") && property == "Rotation") {
+            if (const auto vec = ReadVector3(frame, 3)) {
+                static_cast<BasePart&>(instance).SetRotation(*vec);
+            }
+        } else if (instance.IsA("BasePart") && property == "Size") {
+            if (const auto vec = ReadVector3(frame, 3)) {
+                static_cast<BasePart&>(instance).SetSize(*vec);
+            }
+        } else if (instance.IsA("BasePart") && property == "Color") {
+            if (const auto color = ReadColor3(frame, 3)) {
+                static_cast<BasePart&>(instance).SetColor(*color);
+            }
+        } else if (instance.IsA("BasePart") && property == "Anchored") {
+            static_cast<BasePart&>(instance).SetAnchored(frame.ToBool(3));
+        } else if (instance.IsA("BasePart") && property == "CanCollide") {
+            static_cast<BasePart&>(instance).SetCanCollide(frame.ToBool(3));
+        } else if (instance.IsA("BasePart") && property == "Transparency") {
+            if (const auto num = frame.ReadFloat(3)) {
+                static_cast<BasePart&>(instance).SetTransparency(*num);
+            }
+        } else if (instance.IsA("BasePart") && property == "NetworkOwner") {
+            if (frame.IsNilOrNone(3)) {
+                [[maybe_unused]] const auto result = static_cast<BasePart&>(instance).SetNetworkOwner({});
+            } else if (const InstancePtr owner = ResolveLiveArgInstance(frame, 3); owner && owner->IsA("Player")) {
+                [[maybe_unused]] const auto result = static_cast<BasePart&>(instance).SetNetworkOwner(StaticRefCast<Player>(owner));
+            }
+        } else if (instance.IsA("Part") && property == "Shape") {
+            if (const auto shape = frame.ReadEnum<PartShape>(3)) {
+                static_cast<Part&>(instance).SetShape(*shape);
+            }
+        } else if (instance.IsA("Part") && property == "FrontSurface") {
+            if (const auto surface = frame.ReadEnum<PartSurface>(3)) {
+                static_cast<Part&>(instance).SetFrontSurface(*surface);
+            }
+        } else if (instance.IsA("Part") && property == "BackSurface") {
+            if (const auto surface = frame.ReadEnum<PartSurface>(3)) {
+                static_cast<Part&>(instance).SetBackSurface(*surface);
+            }
+        } else if (instance.IsA("Part") && property == "TopSurface") {
+            if (const auto surface = frame.ReadEnum<PartSurface>(3)) {
+                static_cast<Part&>(instance).SetTopSurface(*surface);
+            }
+        } else if (instance.IsA("Part") && property == "BottomSurface") {
+            if (const auto surface = frame.ReadEnum<PartSurface>(3)) {
+                static_cast<Part&>(instance).SetBottomSurface(*surface);
+            }
+        } else if (instance.IsA("Part") && property == "LeftSurface") {
+            if (const auto surface = frame.ReadEnum<PartSurface>(3)) {
+                static_cast<Part&>(instance).SetLeftSurface(*surface);
+            }
+        } else if (instance.IsA("Part") && property == "RightSurface") {
+            if (const auto surface = frame.ReadEnum<PartSurface>(3)) {
+                static_cast<Part&>(instance).SetRightSurface(*surface);
+            }
+        } else if (instance.IsA("MeshPart") && property == "MeshId") {
+            if (auto meshId = frame.ReadString(3)) {
+                static_cast<MeshPart&>(instance).SetMeshId(std::move(*meshId));
+            }
+        } else if (instance.IsA("SpawnPoint") && property == "Position") {
+            if (const auto vec = ReadVector3(frame, 3)) {
+                static_cast<SpawnPoint&>(instance).SetPosition(*vec);
+            }
+        } else if (instance.IsA("SpawnPoint") && property == "Rotation") {
+            if (const auto vec = ReadVector3(frame, 3)) {
+                static_cast<SpawnPoint&>(instance).SetRotation(*vec);
+            }
+        } else if (instance.IsA("Model") && property == "PrimaryPart") {
+            if (frame.IsNilOrNone(3)) {
+                [[maybe_unused]] const auto result = static_cast<Model&>(instance).SetPrimaryPart({});
+            } else if (const InstancePtr part = ResolveLiveArgInstance(frame, 3); part && part->IsA("BasePart")) {
+                [[maybe_unused]] const auto result = static_cast<Model&>(instance).SetPrimaryPart(StaticRefCast<BasePart>(part));
+            }
+        } else if (instance.IsA("Humanoid") && property == "WalkSpeed") {
+            if (const auto num = frame.ReadFloat(3)) {
+                static_cast<Humanoid&>(instance).SetWalkSpeed(*num);
+            }
+        } else if (instance.IsA("Humanoid") && property == "JumpPower") {
+            if (const auto num = frame.ReadFloat(3)) {
+                static_cast<Humanoid&>(instance).SetJumpPower(*num);
+            }
+        } else if (instance.IsA("Humanoid") && property == "Health") {
+            if (const auto num = frame.ReadFloat(3)) {
+                static_cast<Humanoid&>(instance).SetHealth(*num);
+            }
+        } else if (instance.IsA("Humanoid") && property == "MaxHealth") {
+            if (const auto num = frame.ReadFloat(3)) {
+                static_cast<Humanoid&>(instance).SetMaxHealth(*num);
+            }
+        } else if (instance.IsA("Humanoid") && property == "RootPart") {
+            if (frame.IsNilOrNone(3)) {
+                [[maybe_unused]] const auto result = static_cast<Humanoid&>(instance).SetRootPart({});
+            } else if (const InstancePtr part = ResolveLiveArgInstance(frame, 3); part && part->IsA("BasePart")) {
+                [[maybe_unused]] const auto result = static_cast<Humanoid&>(instance).SetRootPart(StaticRefCast<BasePart>(part));
+            }
+        } else if (instance.IsA("Humanoid") && property == "State") {
+            if (const auto state = frame.ReadEnum<HumanoidState>(3)) {
+                static_cast<Humanoid&>(instance).SetState(*state);
+            }
+        } else if (instance.IsA("Player") && property == "UserId") {
+            if (const auto userId = frame.ReadUInt64(3)) {
+                static_cast<Player&>(instance).SetUserId(*userId);
+            }
+        } else if (instance.IsA("Player") && property == "Character") {
+            if (frame.IsNilOrNone(3)) {
+                [[maybe_unused]] const auto result = static_cast<Player&>(instance).SetCharacter({});
+            } else if (const InstancePtr character = ResolveLiveArgInstance(frame, 3); character && character->IsA("Model")) {
+                [[maybe_unused]] const auto result = static_cast<Player&>(instance).SetCharacter(StaticRefCast<Model>(character));
+            }
+        } else if (instance.IsA("PlayersService") && property == "LocalPlayer") {
+            if (frame.IsNilOrNone(3)) {
+                [[maybe_unused]] const auto result = static_cast<PlayersService&>(instance).SetLocalPlayer({});
+            } else if (const InstancePtr player = ResolveLiveArgInstance(frame, 3); player && player->IsA("Player")) {
+                [[maybe_unused]] const auto result = static_cast<PlayersService&>(instance).SetLocalPlayer(StaticRefCast<Player>(player));
+            }
+        } else if (instance.IsA("WorkspaceService") && property == "CurrentCamera") {
+            if (frame.IsNilOrNone(3)) {
+                [[maybe_unused]] const auto result = static_cast<WorkspaceService&>(instance).SetCurrentCamera({});
+            } else if (const InstancePtr camera = ResolveLiveArgInstance(frame, 3)) {
+                [[maybe_unused]] const auto result = static_cast<WorkspaceService&>(instance).SetCurrentCamera(camera);
+            }
+        } else if (instance.IsA("PhysicsService") && property == "ServerAuthority") {
+            static_cast<PhysicsService&>(instance).SetServerAuthority(frame.ToBool(3));
+        } else if (instance.IsA("Sound") && property == "SoundId") {
+            if (auto soundId = frame.ReadString(3)) {
+                static_cast<Sound&>(instance).SetSoundId(std::move(*soundId));
+            }
+        } else if (instance.IsA("Sound") && property == "Volume") {
+            if (const auto num = frame.ReadFloat(3)) {
+                static_cast<Sound&>(instance).SetVolume(*num);
+            }
+        } else if (instance.IsA("Sound") && property == "Loops") {
+            static_cast<Sound&>(instance).SetLoops(frame.ToBool(3));
+        } else if (instance.IsA("Sound") && property == "Playing") {
+            static_cast<Sound&>(instance).SetPlaying(frame.ToBool(3));
+        } else if (instance.IsA("Decal") && property == "TextureId") {
+            if (auto textureID = frame.ReadString(3)) {
+                static_cast<Decal&>(instance).SetTextureID(std::move(*textureID));
+            }
+        } else if (instance.IsA("Decal") && property == "Color") {
+            if (const auto color = ReadColor3(frame, 3)) {
+                static_cast<Decal&>(instance).SetColor(*color);
+            }
+        } else if (instance.IsA("Decal") && property == "Face") {
+            if (const auto face = frame.ReadEnum<DecalFace>(3)) {
+                static_cast<Decal&>(instance).SetFace(*face);
+            }
+        } else if (instance.IsA("Decal") && property == "WrapMode") {
+            if (const auto wrapMode = frame.ReadEnum<DecalWrapMode>(3)) {
+                static_cast<Decal&>(instance).SetWrapMode(*wrapMode);
+            }
+        } else if (instance.IsA("Decal") && property == "Scale") {
+            if (const auto num = frame.ReadFloat(3)) {
+                static_cast<Decal&>(instance).SetScale(*num);
+            }
+        } else if (instance.IsA("Decal") && property == "Transparency") {
+            if (const auto num = frame.ReadFloat(3)) {
+                static_cast<Decal&>(instance).SetTransparency(*num);
+            }
+        } else if (instance.IsA("Motor") && property == "Part1") {
+            if (frame.IsNilOrNone(3)) {
+                [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart1({});
+            } else if (const InstancePtr part = ResolveLiveArgInstance(frame, 3); part && part->IsA("BasePart")) {
+                [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart1(StaticRefCast<BasePart>(part));
+            }
+        } else if (instance.IsA("Motor") && property == "Part2") {
+            if (frame.IsNilOrNone(3)) {
+                [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart2({});
+            } else if (const InstancePtr part = ResolveLiveArgInstance(frame, 3); part && part->IsA("BasePart")) {
+                [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart2(StaticRefCast<BasePart>(part));
+            }
+        } else if (instance.IsA("Motor") && property == "Offset1") {
+            if (const auto vec = ReadVector3(frame, 3)) {
+                static_cast<Motor&>(instance).SetOffset1(*vec);
+            }
+        } else if (instance.IsA("Motor") && property == "Offset2") {
+            if (const auto vec = ReadVector3(frame, 3)) {
+                static_cast<Motor&>(instance).SetOffset2(*vec);
+            }
+        } else if (instance.IsA("Motor") && property == "CurrentAngle") {
+            if (const auto num = frame.ReadFloat(3)) {
+                static_cast<Motor&>(instance).SetCurrentAngle(*num);
+            }
+        } else if (instance.IsA("Motor") && property == "DesiredAngle") {
+            if (const auto num = frame.ReadFloat(3)) {
+                static_cast<Motor&>(instance).SetDesiredAngle(*num);
+            }
+        } else if (instance.IsA("Motor") && property == "MaxVelocity") {
+            if (const auto num = frame.ReadFloat(3)) {
+                static_cast<Motor&>(instance).SetMaxVelocity(*num);
+            }
+        }
+        return 0;
+    }
+
+    auto InstanceNew(CallFrame& frame) -> int {
+        auto*      host         = frame.HostContext<BindingHostState>();
+        const auto classNameOpt = frame.ReadStringView(1);
+        if (host == nullptr || !host->alive || host->dataModel == nullptr || !classNameOpt) {
+            frame.PushNil();
+            return 1;
+        }
+        const std::string_view className = *classNameOpt;
+        if (className.empty() || className == "DataModel") {
+            frame.PushNil();
+            return 1;
+        }
+
+        std::string name;
+        int         parentIndex = 2;
+        if (frame.IsString(2) && frame.IsNilOrNone(3)) {
+            auto parsed = frame.ReadString(2);
+            if (!parsed) {
+                frame.PushNil();
+                return 1;
+            }
+            name        = std::move(*parsed);
+            parentIndex = 0;
+        } else if (frame.IsString(3)) {
+            auto parsed = frame.ReadString(3);
+            if (!parsed) {
+                frame.PushNil();
+                return 1;
+            }
+            name = std::move(*parsed);
+        }
+
+        auto created = host->dataModel->CreateInstance(className, std::move(name));
+        if (!created) {
+            frame.PushNil();
+            return 1;
+        }
+        InstancePtr instance = std::move(*created);
+
+        if (parentIndex != 0 && !frame.IsNilOrNone(parentIndex)) {
+            const InstancePtr parent = ResolveLiveArgInstance(frame, parentIndex);
+            if (!parent || !instance->SetParent(parent)) {
+                instance->Destroy();
+                frame.PushNil();
+                return 1;
+            }
         } else {
-            InstancePtr parent;
-            if (ReadInstance(state, 3, parent)) [[maybe_unused]] const auto result = instance.SetParent(parent);
+            host->TrackIfUnparented(instance);
         }
-    } else if (instance.IsA("BasePart") && property == "Position") {
-        FVec3 vector;
-        if (ReadVector3(state, 3, vector)) static_cast<BasePart&>(instance).SetPosition(vector);
-    } else if (instance.IsA("BasePart") && property == "Rotation") {
-        FVec3 vector;
-        if (ReadVector3(state, 3, vector)) static_cast<BasePart&>(instance).SetRotation(vector);
-    } else if (instance.IsA("BasePart") && property == "Size") {
-        FVec3 vector;
-        if (ReadVector3(state, 3, vector)) static_cast<BasePart&>(instance).SetSize(vector);
-    } else if (instance.IsA("BasePart") && property == "Color") {
-        FVec3 color;
-        if (ReadColor3(state, 3, color)) static_cast<BasePart&>(instance).SetColor(color);
-    } else if (instance.IsA("BasePart") && property == "Anchored") static_cast<BasePart&>(instance).SetAnchored(lua_toboolean(state, 3) != 0);
-    else if (instance.IsA("BasePart") && property == "CanCollide") static_cast<BasePart&>(instance).SetCanCollide(lua_toboolean(state, 3) != 0);
-    else if (instance.IsA("BasePart") && property == "Transparency") {
-        float number = 0.0f;
-        if (ReadNumber(state, 3, number)) static_cast<BasePart&>(instance).SetTransparency(number);
-    } else if (instance.IsA("BasePart") && property == "NetworkOwner") {
-        InstancePtr owner;
-        if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<BasePart&>(instance).SetNetworkOwner({});
-        else if (ReadInstance(state, 3, owner) && owner->IsA("Player")) {
-            [[maybe_unused]] const auto result = static_cast<BasePart&>(instance).SetNetworkOwner(StaticRefCast<Player>(owner));
-        }
-    } else if (instance.IsA("Part") && property == "Shape") {
-        PartShape shape {};
-        if (ReadPartShape(state, 3, shape)) static_cast<Part&>(instance).SetShape(shape);
-    } else if (instance.IsA("Part") && property == "FrontSurface") {
-        PartSurface surface {};
-        if (ReadPartSurface(state, 3, surface)) static_cast<Part&>(instance).SetFrontSurface(surface);
-    } else if (instance.IsA("Part") && property == "BackSurface") {
-        PartSurface surface {};
-        if (ReadPartSurface(state, 3, surface)) static_cast<Part&>(instance).SetBackSurface(surface);
-    } else if (instance.IsA("Part") && property == "TopSurface") {
-        PartSurface surface {};
-        if (ReadPartSurface(state, 3, surface)) static_cast<Part&>(instance).SetTopSurface(surface);
-    } else if (instance.IsA("Part") && property == "BottomSurface") {
-        PartSurface surface {};
-        if (ReadPartSurface(state, 3, surface)) static_cast<Part&>(instance).SetBottomSurface(surface);
-    } else if (instance.IsA("Part") && property == "LeftSurface") {
-        PartSurface surface {};
-        if (ReadPartSurface(state, 3, surface)) static_cast<Part&>(instance).SetLeftSurface(surface);
-    } else if (instance.IsA("Part") && property == "RightSurface") {
-        PartSurface surface {};
-        if (ReadPartSurface(state, 3, surface)) static_cast<Part&>(instance).SetRightSurface(surface);
-    } else if (instance.IsA("MeshPart") && property == "MeshId") {
-        if (auto meshId = ReadString(state, 3)) static_cast<MeshPart&>(instance).SetMeshId(std::move(*meshId));
-    } else if (instance.IsA("SpawnPoint") && property == "Position") {
-        FVec3 vector;
-        if (ReadVector3(state, 3, vector)) static_cast<SpawnPoint&>(instance).SetPosition(vector);
-    } else if (instance.IsA("SpawnPoint") && property == "Rotation") {
-        FVec3 vector;
-        if (ReadVector3(state, 3, vector)) static_cast<SpawnPoint&>(instance).SetRotation(vector);
-    } else if (instance.IsA("Model") && property == "PrimaryPart") {
-        InstancePtr part;
-        if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<Model&>(instance).SetPrimaryPart({});
-        else if (ReadInstance(state, 3, part) && part->IsA("BasePart")) {
-            [[maybe_unused]] const auto result = static_cast<Model&>(instance).SetPrimaryPart(StaticRefCast<BasePart>(part));
-        }
-    } else if (instance.IsA("Humanoid") && property == "WalkSpeed") {
-        float number = 0.0f;
-        if (ReadNumber(state, 3, number)) static_cast<Humanoid&>(instance).SetWalkSpeed(number);
-    } else if (instance.IsA("Humanoid") && property == "JumpPower") {
-        float number = 0.0f;
-        if (ReadNumber(state, 3, number)) static_cast<Humanoid&>(instance).SetJumpPower(number);
-    } else if (instance.IsA("Humanoid") && property == "Health") {
-        float number = 0.0f;
-        if (ReadNumber(state, 3, number)) static_cast<Humanoid&>(instance).SetHealth(number);
-    } else if (instance.IsA("Humanoid") && property == "MaxHealth") {
-        float number = 0.0f;
-        if (ReadNumber(state, 3, number)) static_cast<Humanoid&>(instance).SetMaxHealth(number);
-    } else if (instance.IsA("Humanoid") && property == "RootPart") {
-        InstancePtr part;
-        if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<Humanoid&>(instance).SetRootPart({});
-        else if (ReadInstance(state, 3, part) && part->IsA("BasePart")) {
-            [[maybe_unused]] const auto result = static_cast<Humanoid&>(instance).SetRootPart(StaticRefCast<BasePart>(part));
-        }
-    } else if (instance.IsA("Humanoid") && property == "State") {
-        HumanoidState humanoidState {};
-        if (ReadHumanoidState(state, 3, humanoidState)) static_cast<Humanoid&>(instance).SetState(humanoidState);
-    } else if (instance.IsA("Player") && property == "UserId" && lua_isnumber(state, 3)) {
-        const double number = lua_tonumber(state, 3);
-        if (number >= 0.0) static_cast<Player&>(instance).SetUserId(static_cast<uint64_t>(number));
-    } else if (instance.IsA("Player") && property == "Character") {
-        InstancePtr character;
-        if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<Player&>(instance).SetCharacter({});
-        else if (ReadInstance(state, 3, character) && character->IsA("Model")) {
-            [[maybe_unused]] const auto result = static_cast<Player&>(instance).SetCharacter(StaticRefCast<Model>(character));
-        }
-    } else if (instance.IsA("PlayersService") && property == "LocalPlayer") {
-        InstancePtr player;
-        if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<PlayersService&>(instance).SetLocalPlayer({});
-        else if (ReadInstance(state, 3, player) && player->IsA("Player")) {
-            [[maybe_unused]] const auto result = static_cast<PlayersService&>(instance).SetLocalPlayer(StaticRefCast<Player>(player));
-        }
-    } else if (instance.IsA("WorkspaceService") && property == "CurrentCamera") {
-        InstancePtr camera;
-        if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<WorkspaceService&>(instance).SetCurrentCamera({});
-        else if (ReadInstance(state, 3, camera)) [[maybe_unused]] const auto result = static_cast<WorkspaceService&>(instance).SetCurrentCamera(camera);
-    } else if (instance.IsA("PhysicsService") && property == "ServerAuthority") {
-        static_cast<PhysicsService&>(instance).SetServerAuthority(lua_toboolean(state, 3) != 0);
-    } else if (instance.IsA("Sound") && property == "SoundId") {
-        if (auto soundId = ReadString(state, 3)) static_cast<Sound&>(instance).SetSoundId(std::move(*soundId));
-    } else if (instance.IsA("Sound") && property == "Volume") {
-        float number = 0.0f;
-        if (ReadNumber(state, 3, number)) static_cast<Sound&>(instance).SetVolume(number);
-    } else if (instance.IsA("Sound") && property == "Loops") static_cast<Sound&>(instance).SetLoops(lua_toboolean(state, 3) != 0);
-    else if (instance.IsA("Sound") && property == "Playing") static_cast<Sound&>(instance).SetPlaying(lua_toboolean(state, 3) != 0);
-    else if (instance.IsA("Decal") && property == "TextureId") {
-        if (auto textureID = ReadString(state, 3)) static_cast<Decal&>(instance).SetTextureID(std::move(*textureID));
-    } else if (instance.IsA("Decal") && property == "Color") {
-        FVec3 color;
-        if (ReadColor3(state, 3, color)) static_cast<Decal&>(instance).SetColor(color);
-    } else if (instance.IsA("Decal") && property == "Face") {
-        DecalFace face {};
-        if (ReadDecalFace(state, 3, face)) static_cast<Decal&>(instance).SetFace(face);
-    } else if (instance.IsA("Decal") && property == "WrapMode") {
-        DecalWrapMode wrapMode {};
-        if (ReadDecalWrapMode(state, 3, wrapMode)) static_cast<Decal&>(instance).SetWrapMode(wrapMode);
-    } else if (instance.IsA("Decal") && property == "Scale") {
-        float number = 0.0f;
-        if (ReadNumber(state, 3, number)) static_cast<Decal&>(instance).SetScale(number);
-    } else if (instance.IsA("Decal") && property == "Transparency") {
-        float number = 0.0f;
-        if (ReadNumber(state, 3, number)) static_cast<Decal&>(instance).SetTransparency(number);
-    } else if (instance.IsA("Motor") && property == "Part1") {
-        InstancePtr part;
-        if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart1({});
-        else if (ReadInstance(state, 3, part) && part->IsA("BasePart")) {
-            [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart1(StaticRefCast<BasePart>(part));
-        }
-    } else if (instance.IsA("Motor") && property == "Part2") {
-        InstancePtr part;
-        if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart2({});
-        else if (ReadInstance(state, 3, part) && part->IsA("BasePart")) {
-            [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart2(StaticRefCast<BasePart>(part));
-        }
-    } else if (instance.IsA("Motor") && property == "Offset1") {
-        FVec3 vector;
-        if (ReadVector3(state, 3, vector)) static_cast<Motor&>(instance).SetOffset1(vector);
-    } else if (instance.IsA("Motor") && property == "Offset2") {
-        FVec3 vector;
-        if (ReadVector3(state, 3, vector)) static_cast<Motor&>(instance).SetOffset2(vector);
-    } else if (instance.IsA("Motor") && property == "CurrentAngle") {
-        float number = 0.0f;
-        if (ReadNumber(state, 3, number)) static_cast<Motor&>(instance).SetCurrentAngle(number);
-    } else if (instance.IsA("Motor") && property == "DesiredAngle") {
-        float number = 0.0f;
-        if (ReadNumber(state, 3, number)) static_cast<Motor&>(instance).SetDesiredAngle(number);
-    } else if (instance.IsA("Motor") && property == "MaxVelocity") {
-        float number = 0.0f;
-        if (ReadNumber(state, 3, number)) static_cast<Motor&>(instance).SetMaxVelocity(number);
-    }
-    return 0;
-}
 
-int InstanceNew(lua_State* state) {
-    LuaBindingContext* context = GetBindingContext(state);
-    if (context == nullptr || context->dataModel == nullptr || lua_type(state, 1) != LUA_TSTRING) {
-        lua_pushnil(state);
+        PushInstance(frame, instance);
         return 1;
     }
 
-    size_t classLength = 0;
-    const char* classNameData = lua_tolstring(state, 1, &classLength);
-    const std::string_view className(classNameData != nullptr ? classNameData : "", classLength);
-    if (className.empty() || className == "DataModel") {
-        lua_pushnil(state);
-        return 1;
+    // ------------------------------------------------------------------------
+    // Signal & Connection dispatch
+    // ------------------------------------------------------------------------
+
+    template <typename PushArguments>
+    void DispatchSignalCallback(
+        const std::weak_ptr<BindingHostState>& weakHost,
+        uint64_t                               connId,
+        std::string_view                       signalLabel,
+        PushArguments&                         pushArguments,
+        auto&&... arguments
+    ) {
+        const std::shared_ptr<BindingHostState> host = weakHost.lock();
+        if (!host || !host->alive || host->vm == nullptr || !host->vm->IsValid()) {
+            return;
+        }
+        const ConnectionSlot* slot = host->FindConnection(connId);
+        if (slot == nullptr || !slot->connected || slot->listenerId == ZHLN::Lua::kInvalidListenerID) {
+            return;
+        }
+        const ListenerID listenerId = slot->listenerId;
+        const auto pushArgs = [&](CallFrame& cbFrame) {
+            pushArguments(cbFrame, std::forward<decltype(arguments)>(arguments)...);
+        };
+        const auto res = host->vm->InvokeListener(listenerId, pushArgs, signalLabel);
+        if (!res) {
+            const std::string_view detail = host->vm->LastErrorDetail();
+            host->lastCallbackError = detail.empty() ? "unknown Lua callback error" : std::string(detail);
+            ZHLN::Log<ZHLN::LogSeverity::Error>(ZHLN::LogChannel {"Script"}, "Lua callback failed: {}", host->lastCallbackError);
+        }
     }
 
-    std::string name;
-    int parentIndex = 2;
-    if (lua_type(state, 2) == LUA_TSTRING && (lua_isnoneornil(state, 3))) {
-        auto parsed = ReadString(state, 2);
-        if (!parsed) {
-            lua_pushnil(state);
+    template <typename Signal, typename PushArguments>
+    void ConnectSignalSlot(
+        CallFrame&                             frame,
+        const std::shared_ptr<BindingHostState>& host,
+        Signal&                                signal,
+        std::string_view                       signalLabel,
+        int                                    callbackIndex,
+        PushArguments                          pushArguments
+    ) {
+        const ListenerID listenerId = frame.RegisterListener(callbackIndex);
+        if (listenerId == ZHLN::Lua::kInvalidListenerID) {
+            frame.PushNil();
+            return;
+        }
+
+        const uint64_t connId = host->nextConnId++;
+        using Token           = typename Signal::Connection;
+        auto token            = std::make_shared<Token>();
+        const std::weak_ptr<BindingHostState> weakHost = host;
+
+        *token = signal.Connect([weakHost, connId, signalLabel, pushArguments = std::move(pushArguments)](auto&&... arguments) mutable {
+            DispatchSignalCallback(weakHost, connId, signalLabel, pushArguments, std::forward<decltype(arguments)>(arguments)...);
+        });
+
+        std::erase_if(host->connections, [](const ConnectionSlot& existing) { return !existing.connected; });
+        host->connections.push_back(ConnectionSlot {
+            .id                  = connId,
+            .listenerId          = listenerId,
+            .connected           = true,
+            .disconnectCppSignal = [token]() noexcept { token->Disconnect(); },
+        });
+
+        frame.PushUserdata(LuaConnectionRef {.connectionId = connId});
+    }
+
+    auto SignalConnect(CallFrame& frame) -> int {
+        if (!frame.IsFunction(2)) {
+            frame.PushNil();
             return 1;
         }
-        name = std::move(*parsed);
-        parentIndex = 0;
-    } else if (lua_type(state, 3) == LUA_TSTRING) {
-        auto parsed = ReadString(state, 3);
-        if (!parsed) {
-            lua_pushnil(state);
+        const auto* signal = frame.TestUserdata<LuaSignalRef>(1);
+        auto*       rawHost = frame.HostContext<std::shared_ptr<BindingHostState>>();
+        if (signal == nullptr || rawHost == nullptr || !(*rawHost) || !(*rawHost)->alive) {
+            frame.PushNil();
             return 1;
         }
-        name = std::move(*parsed);
-    }
-
-    auto created = context->dataModel->CreateInstance(className, std::move(name));
-    if (!created) {
-        lua_pushnil(state);
-        return 1;
-    }
-    InstancePtr instance = std::move(created.value());
-
-    if (parentIndex != 0 && !lua_isnoneornil(state, parentIndex)) {
-        InstancePtr parent;
-        if (!ReadInstance(state, parentIndex, parent) || !instance->SetParent(parent)) {
-            instance->Destroy();
-            lua_pushnil(state);
+        const std::shared_ptr<BindingHostState>& host = *rawHost;
+        const InstancePtr owner = ResolveInstance(
+            host.get(),
+            LuaInstanceRef {.id = signal->ownerId, .isRoot = signal->ownerIsRoot}
+        );
+        if (!owner) {
+            frame.PushNil();
             return 1;
         }
+
+        switch (signal->kind) {
+        case SignalKind::ChildAdded:
+            ConnectSignalSlot(
+                frame, host, owner->ChildAdded, "ChildAdded", 2,
+                [](CallFrame& cb, const InstancePtr& child) { PushInstance(cb, child); }
+            );
+            return 1;
+        case SignalKind::ChildRemoved:
+            ConnectSignalSlot(
+                frame, host, owner->ChildRemoved, "ChildRemoved", 2,
+                [](CallFrame& cb, const InstancePtr& child) { PushInstance(cb, child); }
+            );
+            return 1;
+        case SignalKind::DescendantAdded:
+            ConnectSignalSlot(
+                frame, host, owner->DescendantAdded, "DescendantAdded", 2,
+                [](CallFrame& cb, const InstancePtr& child) { PushInstance(cb, child); }
+            );
+            return 1;
+        case SignalKind::DescendantRemoved:
+            ConnectSignalSlot(
+                frame, host, owner->DescendantRemoved, "DescendantRemoved", 2,
+                [](CallFrame& cb, const InstancePtr& child) { PushInstance(cb, child); }
+            );
+            return 1;
+        case SignalKind::Destroying:
+            ConnectSignalSlot(
+                frame, host, owner->Destroying, "Destroying", 2,
+                [](CallFrame& cb, const InstancePtr& item) { PushInstance(cb, item); }
+            );
+            return 1;
+        case SignalKind::AncestryChanged:
+            ConnectSignalSlot(
+                frame, host, owner->AncestryChanged, "AncestryChanged", 2,
+                [](CallFrame& cb, const InstancePtr& item, const InstancePtr& parent) {
+                    PushInstance(cb, item);
+                    PushInstance(cb, parent);
+                }
+            );
+            return 1;
+        case SignalKind::PropertyChanged:
+            ConnectSignalSlot(
+                frame, host, owner->PropertyChanged, "PropertyChanged", 2,
+                [](CallFrame& cb, std::string_view prop) { cb.PushString(prop); }
+            );
+            return 1;
+        case SignalKind::HumanoidStateChanged:
+            if (owner->IsA("Humanoid")) {
+                ConnectSignalSlot(
+                    frame, host, static_cast<Humanoid*>(owner.GetPtr())->StateChanged, "StateChanged", 2,
+                    [](CallFrame& cb, HumanoidState oldState, HumanoidState newState) {
+                        cb.PushEnum(oldState);
+                        cb.PushEnum(newState);
+                    }
+                );
+                return 1;
+            }
+            break;
+        case SignalKind::SoundEnded:
+            if (owner->IsA("Sound")) {
+                ConnectSignalSlot(
+                    frame, host, static_cast<Sound*>(owner.GetPtr())->Ended, "Ended", 2,
+                    [](CallFrame& /*cb*/) {}
+                );
+                return 1;
+            }
+            break;
+        }
+        frame.PushNil();
+        return 1;
     }
 
-    PushInstance(state, instance);
-    return 1;
-}
-
-template <typename Signal, typename PushArguments>
-void ConnectSignal(lua_State* state, LuaBindingContext& context, Signal& signal, int callbackIndex, PushArguments pushArguments);
-
-int SignalConnect(lua_State* state) {
-    if (lua_type(state, 2) != LUA_TFUNCTION) {
-        lua_pushnil(state);
-        return 1;
-    }
-    const auto* signal = TestUserdata<LuaSignal>(state, 1, kSignalMetatable);
-    LuaBindingContext* context = GetBindingContext(state);
-    if (signal == nullptr || !signal->owner || context == nullptr || !context->alive) {
-        lua_pushnil(state);
-        return 1;
+    auto ConnectionDisconnect(CallFrame& frame) -> int {
+        const auto* conn = frame.TestUserdata<LuaConnectionRef>(1);
+        auto*       host = frame.HostContext<BindingHostState>();
+        if (conn != nullptr && host != nullptr && host->alive) {
+            host->DisconnectSlot(conn->connectionId);
+        }
+        return 0;
     }
 
-    const auto owner = signal->owner;
-    switch (signal->kind) {
-    case SignalKind::ChildAdded:
-        ConnectSignal(state, *context, owner->ChildAdded, 2,
-            [](lua_State* target, const InstancePtr& child) { PushInstance(target, child); });
-        return 1;
-    case SignalKind::ChildRemoved:
-        ConnectSignal(state, *context, owner->ChildRemoved, 2,
-            [](lua_State* target, const InstancePtr& child) { PushInstance(target, child); });
-        return 1;
-    case SignalKind::DescendantAdded:
-        ConnectSignal(state, *context, owner->DescendantAdded, 2,
-            [](lua_State* target, const InstancePtr& child) { PushInstance(target, child); });
-        return 1;
-    case SignalKind::DescendantRemoved:
-        ConnectSignal(state, *context, owner->DescendantRemoved, 2,
-            [](lua_State* target, const InstancePtr& child) { PushInstance(target, child); });
-        return 1;
-    case SignalKind::Destroying:
-        ConnectSignal(state, *context, owner->Destroying, 2,
-            [](lua_State* target, const InstancePtr& item) { PushInstance(target, item); });
-        return 1;
-    case SignalKind::AncestryChanged:
-        ConnectSignal(state, *context, owner->AncestryChanged, 2,
-            [](lua_State* target, const InstancePtr& item, const InstancePtr& parent) {
-                PushInstance(target, item);
-                PushInstance(target, parent);
-            });
-        return 1;
-    case SignalKind::PropertyChanged:
-        ConnectSignal(state, *context, owner->PropertyChanged, 2,
-            [](lua_State* target, std::string_view property) { lua_pushlstring(target, property.data(), property.size()); });
-        return 1;
-    case SignalKind::HumanoidStateChanged:
-        if (owner->IsA("Humanoid")) {
-            ConnectSignal(state, *context, static_cast<Humanoid*>(owner.GetPtr())->StateChanged, 2,
-                [](lua_State* target, HumanoidState oldState, HumanoidState newState) {
-                    PushHumanoidState(target, oldState);
-                    PushHumanoidState(target, newState);
-                });
+    auto ConnectionIndex(CallFrame& frame) -> int {
+        const auto* conn    = frame.TestUserdata<LuaConnectionRef>(1);
+        const auto  propOpt = frame.ReadStringView(2);
+        auto*       host    = frame.HostContext<BindingHostState>();
+        if (conn == nullptr || !propOpt) {
+            frame.PushNil();
             return 1;
         }
-        break;
-    case SignalKind::SoundEnded:
-        if (owner->IsA("Sound")) {
-            ConnectSignal(state, *context, static_cast<Sound*>(owner.GetPtr())->Ended, 2,
-                [](lua_State*) {});
+        if (*propOpt == "Connected") {
+            const ConnectionSlot* slot = (host != nullptr && host->alive) ? host->FindConnection(conn->connectionId) : nullptr;
+            frame.PushBool(slot != nullptr && slot->connected);
             return 1;
         }
-        break;
-    }
-    lua_pushnil(state);
-    return 1;
-}
-
-int SignalIndex(lua_State* state) {
-    if (lua_type(state, 2) == LUA_TSTRING) {
-        size_t length = 0;
-        const char* key = lua_tolstring(state, 2, &length);
-        const std::string_view property(key != nullptr ? key : "", length);
-        if (property == "Connect") {
-            lua_pushcfunction(state, SignalConnect);
-            return 1;
-        }
-    }
-    lua_pushnil(state);
-    return 1;
-}
-
-int ConnectionDisconnect(lua_State* state) {
-    auto* value = TestUserdata<LuaConnectionUserdata>(state, 1, kConnectionMetatable);
-    if (value != nullptr && value->connection) value->connection->Disconnect();
-    return 0;
-}
-
-int ConnectionIndex(lua_State* state) {
-    const auto* value = TestUserdata<LuaConnectionUserdata>(state, 1, kConnectionMetatable);
-    if (value == nullptr || !value->connection || lua_type(state, 2) != LUA_TSTRING) {
-        lua_pushnil(state);
+        frame.PushNil();
         return 1;
     }
-    size_t length = 0;
-    const char* key = lua_tolstring(state, 2, &length);
-    const std::string_view property(key != nullptr ? key : "", length);
-    if (property == "Connected") lua_pushboolean(state, value->connection->connected);
-    else if (property == "Disconnect") lua_pushcfunction(state, ConnectionDisconnect);
-    else lua_pushnil(state);
-    return 1;
-}
 
-template <typename Connection>
-void InvokeLuaConnection(const std::weak_ptr<LuaConnectionRecord>& weakConnection, auto& pushArguments, auto&&... arguments) {
-    const auto connection = weakConnection.lock();
-    if (!connection || !connection->connected || connection->state == nullptr || connection->callbackRef == LUA_NOREF) return;
-    lua_State* state = connection->state;
-    const int originalTop = lua_gettop(state);
-    lua_rawgeti(state, LUA_REGISTRYINDEX, connection->callbackRef);
-    pushArguments(state, std::forward<decltype(arguments)>(arguments)...);
-    if (lua_pcall(state, static_cast<int>(sizeof...(arguments)), 0, 0) != LUA_OK) {
-        const char* error = lua_tostring(state, -1);
-        if (LuaBindingContext* context = GetBindingContext(state); context != nullptr) {
-            context->lastCallbackError = error != nullptr ? error : "unknown Lua callback error";
-            ZHLN::Log<ZHLN::LogSeverity::Error>(ZHLN::LogChannel{"Script"}, "Lua callback failed: {}", context->lastCallbackError);
+    template <typename E>
+    void PopulateEnumSubtable(CallFrame& frame, std::string_view enumName) noexcept {
+        frame.BeginTable(0, static_cast<int>(ZHLN::Reflect::EnumCount<E>()));
+        constexpr auto names = ZHLN::Reflect::EnumNames<E>();
+        for (const std::string_view name: names) {
+            const auto value = ZHLN::Reflect::StringToEnum<E>(name);
+            if (!value) {
+                continue;
+            }
+            frame.PushEnum(*value);
+            frame.SetFieldTop(name);
         }
+        frame.SetFieldTop(enumName);
     }
-    lua_settop(state, originalTop);
-}
-
-template <typename Signal, typename PushArguments>
-void ConnectSignal(lua_State* state, LuaBindingContext& context, Signal& signal, int callbackIndex, PushArguments pushArguments) {
-    lua_pushvalue(state, callbackIndex);
-    const int callbackRef = luaL_ref(state, LUA_REGISTRYINDEX);
-
-    auto connection = std::make_shared<LuaConnectionRecord>();
-    connection->state = state;
-    connection->callbackRef = callbackRef;
-
-    using Token = typename Signal::Connection;
-    auto token = std::make_shared<Token>();
-    const std::weak_ptr<LuaConnectionRecord> weakConnection = connection;
-    *token = signal.Connect([weakConnection, pushArguments = std::move(pushArguments)](auto&&... arguments) mutable {
-        InvokeLuaConnection<Token>(weakConnection, pushArguments, std::forward<decltype(arguments)>(arguments)...);
-    });
-    connection->disconnect = [token] { token->Disconnect(); };
-
-    std::erase_if(context.connections, [](const auto& current) { return !current || !current->connected; });
-    context.connections.push_back(connection);
-    PushConnection(state, std::move(connection));
-}
-
-int Vector3NewIndex(lua_State*) {
-    return 0;
-}
-
-int Color3NewIndex(lua_State*) {
-    return 0;
-}
-
-void RegisterMetatables(lua_State* state) {
-    luaL_newmetatable(state, kInstanceMetatable);
-    lua_pushcfunction(state, InstanceIndex);
-    lua_setfield(state, -2, "__index");
-    lua_pushcfunction(state, InstanceNewIndex);
-    lua_setfield(state, -2, "__newindex");
-    lua_pushcfunction(state, InstanceGc);
-    lua_setfield(state, -2, "__gc");
-    lua_pushcfunction(state, InstanceToString);
-    lua_setfield(state, -2, "__tostring");
-    lua_pushcfunction(state, InstanceEqual);
-    lua_setfield(state, -2, "__eq");
-    lua_pop(state, 1);
-
-    luaL_newmetatable(state, kVector3Metatable);
-    lua_pushcfunction(state, Vector3Index);
-    lua_setfield(state, -2, "__index");
-    lua_pushcfunction(state, Vector3NewIndex);
-    lua_setfield(state, -2, "__newindex");
-    lua_pushcfunction(state, Vector3Gc);
-    lua_setfield(state, -2, "__gc");
-    lua_pushcfunction(state, Vector3Add);
-    lua_setfield(state, -2, "__add");
-    lua_pushcfunction(state, Vector3Sub);
-    lua_setfield(state, -2, "__sub");
-    lua_pushcfunction(state, Vector3Unm);
-    lua_setfield(state, -2, "__unm");
-    lua_pushcfunction(state, Vector3Mul);
-    lua_setfield(state, -2, "__mul");
-    lua_pushcfunction(state, Vector3Div);
-    lua_setfield(state, -2, "__div");
-    lua_pushcfunction(state, Vector3Equal);
-    lua_setfield(state, -2, "__eq");
-    lua_pop(state, 1);
-
-    luaL_newmetatable(state, kColor3Metatable);
-    lua_pushcfunction(state, Color3Index);
-    lua_setfield(state, -2, "__index");
-    lua_pushcfunction(state, Color3NewIndex);
-    lua_setfield(state, -2, "__newindex");
-    lua_pushcfunction(state, Color3Gc);
-    lua_setfield(state, -2, "__gc");
-    lua_pushcfunction(state, Color3Equal);
-    lua_setfield(state, -2, "__eq");
-    lua_pop(state, 1);
-
-    luaL_newmetatable(state, kSignalMetatable);
-    lua_pushcfunction(state, SignalIndex);
-    lua_setfield(state, -2, "__index");
-    lua_pushcfunction(state, SignalGc);
-    lua_setfield(state, -2, "__gc");
-    lua_pop(state, 1);
-
-    luaL_newmetatable(state, kConnectionMetatable);
-    lua_pushcfunction(state, ConnectionIndex);
-    lua_setfield(state, -2, "__index");
-    lua_pushcfunction(state, ConnectionGc);
-    lua_setfield(state, -2, "__gc");
-    lua_pop(state, 1);
-
-    luaL_newmetatable(state, kContextMetatable);
-    lua_pushcfunction(state, ContextGc);
-    lua_setfield(state, -2, "__gc");
-    lua_pop(state, 1);
-}
-
-void RegisterVector3(lua_State* state) {
-    lua_newtable(state);
-    lua_pushcfunction(state, Vector3New);
-    lua_setfield(state, -2, "new");
-    PushVector3(state, 0.0f, 0.0f, 0.0f);
-    lua_setfield(state, -2, "zero");
-    PushVector3(state, 1.0f, 1.0f, 1.0f);
-    lua_setfield(state, -2, "one");
-    PushVector3(state, 1.0f, 0.0f, 0.0f);
-    lua_setfield(state, -2, "xAxis");
-    PushVector3(state, 0.0f, 1.0f, 0.0f);
-    lua_setfield(state, -2, "yAxis");
-    PushVector3(state, 0.0f, 0.0f, 1.0f);
-    lua_setfield(state, -2, "zAxis");
-    lua_setglobal(state, "Vector3");
-}
-
-void RegisterColor3(lua_State* state) {
-    lua_newtable(state);
-    lua_pushcfunction(state, Color3New);
-    lua_setfield(state, -2, "new");
-    lua_pushcfunction(state, Color3FromRGB);
-    lua_setfield(state, -2, "fromRGB");
-    lua_setglobal(state, "Color3");
-}
-
-template <typename E>
-void PushEnumTable(lua_State* state, const char* enumName) {
-    lua_newtable(state);
-    constexpr auto names = ZHLN::Reflect::EnumNames<E>();
-    for (const std::string_view name: names) {
-        const auto value = ZHLN::Reflect::StringToEnum<E>(name);
-        if (!value) continue;
-        const std::string_view canonicalName = CanonicalEnumName(*value);
-        lua_pushlstring(state, name.data(), name.size());
-        lua_pushlstring(state, canonicalName.data(), canonicalName.size());
-        lua_settable(state, -3);
-    }
-    lua_setfield(state, -2, enumName);
-}
-
-void RegisterEnums(lua_State* state) {
-    lua_newtable(state);
-    PushEnumTable<PartShape>(state, "PartShape");
-    PushEnumTable<HumanoidState>(state, "HumanoidState");
-    PushEnumTable<PartSurface>(state, "PartSurface");
-    PushEnumTable<DecalFace>(state, "DecalFace");
-    PushEnumTable<DecalWrapMode>(state, "DecalWrapMode");
-    lua_setglobal(state, "Enum");
-}
-
-void RegisterInstanceLibrary(lua_State* state) {
-    lua_newtable(state);
-    lua_pushcfunction(state, InstanceNew);
-    lua_setfield(state, -2, "new");
-    lua_setglobal(state, "Instance");
-}
 
 } // namespace
 
-void RegisterDataModelLuaBindings(lua_State* state, DataModel& dataModel) {
-    if (state == nullptr) return;
-    if (GetBindingContext(state) != nullptr) return;
+struct DataModelLuaSession::Impl {
+    std::shared_ptr<BindingHostState> host;
 
-    RegisterMetatables(state);
-
-    lua_pushlightuserdata(state, &kInstanceCacheRegistryKey);
-    lua_newtable(state);
-    lua_newtable(state);
-    lua_pushliteral(state, "v");
-    lua_setfield(state, -2, "__mode");
-    lua_setmetatable(state, -2);
-    lua_rawset(state, LUA_REGISTRYINDEX);
-
-    auto* contextBox = static_cast<LuaContextUserdata*>(lua_newuserdata(state, sizeof(LuaContextUserdata)));
-    auto* context = new LuaBindingContext {};
-    context->state = state;
-    context->dataModel = &dataModel;
-    new (contextBox) LuaContextUserdata {.context = context};
-    luaL_getmetatable(state, kContextMetatable);
-    lua_setmetatable(state, -2);
-    lua_pushlightuserdata(state, &kBindingContextRegistryKey);
-    lua_pushvalue(state, -2);
-    lua_rawset(state, LUA_REGISTRYINDEX);
-    lua_pop(state, 1);
-
-    RegisterVector3(state);
-    RegisterColor3(state);
-    RegisterEnums(state);
-    RegisterInstanceLibrary(state);
-
-    PushInstance(state, dataModel.Root());
-    lua_setglobal(state, "game");
-    if (const auto workspace = dataModel.GetService("Workspace")) {
-        PushInstance(state, workspace);
-        lua_setglobal(state, "workspace");
+    ~Impl() {
+        Teardown();
     }
+
+    void Teardown() noexcept {
+        if (!host) {
+            return;
+        }
+        host->alive = false;
+        host->DisconnectAll();
+        if (host->vm != nullptr && host->vm->IsValid()) {
+            host->vm->ClearHostContext<BindingHostState>();
+            host->vm->ClearHostContext<std::shared_ptr<BindingHostState>>();
+        }
+        host->vm        = nullptr;
+        host->dataModel = nullptr;
+    }
+};
+
+DataModelLuaSession::DataModelLuaSession() noexcept = default;
+DataModelLuaSession::~DataModelLuaSession()         = default;
+DataModelLuaSession::DataModelLuaSession(DataModelLuaSession&& other) noexcept = default;
+auto DataModelLuaSession::operator=(DataModelLuaSession&& other) noexcept -> DataModelLuaSession& = default;
+
+void DataModelLuaSession::DisconnectAll() noexcept {
+    if (m_impl && m_impl->host) {
+        m_impl->host->DisconnectAll();
+    }
+}
+
+auto DataModelLuaSession::LastCallbackError() const noexcept -> std::string_view {
+    if (!m_impl || !m_impl->host) {
+        return {};
+    }
+    return m_impl->host->lastCallbackError;
+}
+
+auto DataModelLuaSession::Bind(VirtualMachine& vm, DataModel& dataModel) -> std::expected<DataModelLuaSession, ZHLN::ErrorCode> {
+    if (!vm.IsValid()) {
+        return std::unexpected(ZHLN::Lua::Error::AllocationFailed);
+    }
+
+    static constexpr std::array<MethodEntry, 3> kVector3Methods = {{
+        {"Dot", &Vector3Dot},
+        {"Cross", &Vector3Cross},
+        {"Lerp", &Vector3Lerp},
+    }};
+    static constexpr std::array<MethodEntry, 1> kColor3Methods = {{
+        {"Lerp", &Color3Lerp},
+    }};
+    static constexpr std::array<MethodEntry, 1> kSignalMethods = {{
+        {"Connect", &SignalConnect},
+    }};
+    static constexpr std::array<MethodEntry, 1> kConnectionMethods = {{
+        {"Disconnect", &ConnectionDisconnect},
+    }};
+
+    if (auto res = vm.RegisterUserdataType<LuaInstanceRef>(MetatableSpec {
+            .debugName = "ZHLN.ProjectLight.Instance",
+            .index     = &InstanceIndex,
+            .newIndex  = &InstanceNewIndex,
+            .toString  = &InstanceToString,
+            .eq        = &InstanceEqual,
+        });
+        !res) {
+        return std::unexpected(res.error());
+    }
+
+    if (auto res = vm.RegisterUserdataType<LuaVector3>(MetatableSpec {
+            .debugName = "ZHLN.ProjectLight.Vector3",
+            .index     = &Vector3Index,
+            .newIndex  = &IgnoreReadOnlyNewIndex,
+            .eq        = &Vector3Equal,
+            .add       = &Vector3Add,
+            .sub       = &Vector3Sub,
+            .mul       = &Vector3Mul,
+            .div       = &Vector3Div,
+            .unm       = &Vector3Unm,
+            .methods   = kVector3Methods,
+        });
+        !res) {
+        return std::unexpected(res.error());
+    }
+
+    if (auto res = vm.RegisterUserdataType<LuaColor3>(MetatableSpec {
+            .debugName = "ZHLN.ProjectLight.Color3",
+            .index     = &Color3Index,
+            .newIndex  = &IgnoreReadOnlyNewIndex,
+            .eq        = &Color3Equal,
+            .methods   = kColor3Methods,
+        });
+        !res) {
+        return std::unexpected(res.error());
+    }
+
+    if (auto res = vm.RegisterUserdataType<LuaSignalRef>(MetatableSpec {
+            .debugName = "ZHLN.ProjectLight.Signal",
+            .methods   = kSignalMethods,
+        });
+        !res) {
+        return std::unexpected(res.error());
+    }
+
+    if (auto res = vm.RegisterUserdataType<LuaConnectionRef>(MetatableSpec {
+            .debugName = "ZHLN.ProjectLight.Connection",
+            .index     = &ConnectionIndex,
+            .methods   = kConnectionMethods,
+        });
+        !res) {
+        return std::unexpected(res.error());
+    }
+
+    auto impl               = std::make_unique<Impl>();
+    impl->host              = std::make_shared<BindingHostState>();
+    impl->host->vm          = &vm;
+    impl->host->dataModel   = &dataModel;
+    impl->host->alive       = true;
+
+    vm.SetHostContext<BindingHostState>(impl->host.get());
+    vm.SetHostContext<std::shared_ptr<BindingHostState>>(&impl->host);
+
+    const auto populateGlobals = [&](CallFrame& frame) {
+        // Vector3 global table
+        frame.BeginTable(0, 6);
+        frame.PushFunction(&Vector3New);
+        frame.SetFieldTop("new");
+        PushVector3(frame, 0.0f, 0.0f, 0.0f);
+        frame.SetFieldTop("zero");
+        PushVector3(frame, 1.0f, 1.0f, 1.0f);
+        frame.SetFieldTop("one");
+        PushVector3(frame, 1.0f, 0.0f, 0.0f);
+        frame.SetFieldTop("xAxis");
+        PushVector3(frame, 0.0f, 1.0f, 0.0f);
+        frame.SetFieldTop("yAxis");
+        PushVector3(frame, 0.0f, 0.0f, 1.0f);
+        frame.SetFieldTop("zAxis");
+        frame.SetGlobalTop("Vector3");
+
+        // Color3 global table
+        frame.BeginTable(0, 2);
+        frame.PushFunction(&Color3New);
+        frame.SetFieldTop("new");
+        frame.PushFunction(&Color3FromRGB);
+        frame.SetFieldTop("fromRGB");
+        frame.SetGlobalTop("Color3");
+
+        // Enum global table
+        frame.BeginTable(0, 5);
+        PopulateEnumSubtable<PartShape>(frame, "PartShape");
+        PopulateEnumSubtable<HumanoidState>(frame, "HumanoidState");
+        PopulateEnumSubtable<PartSurface>(frame, "PartSurface");
+        PopulateEnumSubtable<DecalFace>(frame, "DecalFace");
+        PopulateEnumSubtable<DecalWrapMode>(frame, "DecalWrapMode");
+        frame.SetGlobalTop("Enum");
+
+        // Instance global table
+        frame.BeginTable(0, 1);
+        frame.PushFunction(&InstanceNew);
+        frame.SetFieldTop("new");
+        frame.SetGlobalTop("Instance");
+
+        // Root `game` and optional `workspace`
+        PushInstance(frame, dataModel.Root());
+        frame.SetGlobalTop("game");
+        if (const auto workspace = dataModel.GetService("Workspace")) {
+            PushInstance(frame, workspace);
+            frame.SetGlobalTop("workspace");
+        }
+    };
+    const auto globalsRes = vm.WithFrame(populateGlobals);
+
+    if (!globalsRes) {
+        impl->Teardown();
+        return std::unexpected(globalsRes.error());
+    }
+
+    DataModelLuaSession session;
+    session.m_impl = std::move(impl);
+    return session;
 }
 
 } // namespace ZHLN::ProjectLight

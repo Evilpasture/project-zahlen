@@ -267,7 +267,7 @@ struct ConsoleDebuggerTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> patch_applies_lua_table_and_rolls_back_on_error() {
+        std::expected<void, ZHLN::ErrorCode> patch_reports_lua_unavailable_and_leaves_component_unchanged() {
             auto created = ZHLN::COM::CreateLogicWorld();
             if (!created)
                 return std::unexpected(created.error());
@@ -278,23 +278,14 @@ struct ConsoleDebuggerTestSuite {
             reg.Attach(e, ZHLN::Components::PBRComponent {.roughness = 0.5f, .metallic = 0.1f});
             const std::string id = std::format("{}", e.Pack());
 
-            ZHLN::GameConsole okConsole;
-            ZHLN::ConsoleDebugger::Execute(reg, okConsole, std::format("patch {} PBRComponent {{ roughness = 0.15 + 0.05, metallic = 0.8 }}", id));
-            ZHLN::Test::ExpectTrue(Contains(JoinedLogs(okConsole), "Patched PBRComponent"));
-            const auto updated = reg.Get<ZHLN::Components::PBRComponent>(e);
-            ZHLN::Test::ExpectTrue(updated != nullptr);
-            if (updated) {
-                ZHLN::Test::ExpectEq(updated->roughness, 0.2f);
-                ZHLN::Test::ExpectEq(updated->metallic, 0.8f);
-            }
-
-            // Invalid field must roll back the entire patch cleanly.
-            ZHLN::GameConsole badConsole;
-            ZHLN::ConsoleDebugger::Execute(reg, badConsole, std::format("patch {} PBRComponent {{ roughness = 0.99, noSuchProp = 1 }}", id));
-            ZHLN::Test::ExpectTrue(Contains(JoinedLogs(badConsole), "Failed to patch PBRComponent"));
-            const auto preserved = reg.Get<ZHLN::Components::PBRComponent>(e);
-            if (preserved) {
-                ZHLN::Test::ExpectEq(preserved->roughness, 0.2f);
+            ZHLN::GameConsole console;
+            ZHLN::ConsoleDebugger::Execute(reg, console, std::format("patch {} PBRComponent {{ roughness = 0.15 + 0.05 }}", id));
+            ZHLN::Test::ExpectTrue(Contains(JoinedLogs(console), "Lua patching is not available in this build."));
+            const auto unchanged = reg.Get<ZHLN::Components::PBRComponent>(e);
+            ZHLN::Test::ExpectTrue(unchanged != nullptr);
+            if (unchanged) {
+                ZHLN::Test::ExpectEq(unchanged->roughness, 0.5f);
+                ZHLN::Test::ExpectEq(unchanged->metallic, 0.1f);
             }
             return {};
         }

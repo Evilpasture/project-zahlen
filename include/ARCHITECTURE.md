@@ -227,7 +227,7 @@ A few examples illustrate the intended seam:
   or the ProjectLight protocol.
 * **Lua is a state-only plugin, never a per-frame scripting runtime.** Core
   knows nothing about Lua, FFI, or Fennel; all frame simulation runs in C++26
-  systems. `plugins/lua/` (`ReflectLua`) evaluates bounded, sandboxed Lua
+  systems. `plugins/lua/` (`Lua`) evaluates bounded, sandboxed Lua
   chunks (`no ffi/io/os/package/debug`) into C++26 reflected structs and
   components at startup, scene load, hot-reload, or console `patch`. The
   Lua-independent property inspector lives in `extensions/Scripting/`.
@@ -952,7 +952,7 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 ## 5. Reflection-Driven Lua State Management (`plugins/lua/`)
 
 * **State-Only Contract**: C++ ECS components (`std::is_trivially_copyable_v`) and reflected structs are the sole source of truth. Lua chunks run only at initialization, scene/asset recipe evaluation, file-watch hot-reload (`config/graphics.lua`), or explicit console `patch` commands — never inside a per-frame `TickUpdate`.
-* **Hermetic Sandbox & Transactional Patching**: `ReflectLua` evaluates plain-text Lua in an isolated VM (never opening `ffi`/`io`/`os`/`package`/`debug`/`jit`, enforcing deterministic instruction and memory budgets), hydrating staging copies first so invalid fields or types roll back without mutating live engine state.
+* **Hermetic Sandbox & Transactional Patching**: `Lua` evaluates plain-text Lua in an isolated VM (never opening `ffi`/`io`/`os`/`package`/`debug`/`jit`, enforcing deterministic instruction and memory budgets), hydrating staging copies first so invalid fields or types roll back without mutating live engine state.
 
 ---
 
@@ -966,7 +966,7 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 6. **VFS Loading & Plugin Filesystem Boundary**:
    * `FS::VirtualFileSystem` (and its COM capability facade `COM::IAssetLibrary`) is the single virtual-asset read boundary for the engine and all plugins. `Open` / `OpenVirtualFile` return a move-only RAII `VirtualFile` / `COM::Ref<COM::IVirtualFile>` holding either a zero-copy pinned `.pak` slice or an owned loose-file byte buffer; `ReadBytes`, `ReadText`, `FileSize`, `LoadSync`, and `LoadAsync` return typed `std::expected<..., ErrorCode>` using `FS::VFSError`.
    * Hosts own mount policy (`MountPak`, `MountDirectory` with `MountOptions` / `COM::MountDirectoryOptions { .virtualPrefix, .caseInsensitive }`) and process-directory discovery (`FS::Paths::FindDataFile`, `CacheDir`, etc.).
-   * **Plugins never touch the host OS filesystem directly**: `plugins/AssetCooking`, `plugins/Fonts`, `plugins/glTF`, `plugins/BSP` (`SourceVFS`), `plugins/SVG` (`ISvgRasterizer` / `SVG.hpp`), and core `plugins/lua/ReflectLua.hpp` read exclusively through `FS::VirtualFileSystem`, `COM::IAssetLibrary`, or caller-supplied byte spans — never `<filesystem>`, `<fstream>`, `FS::Paths`, CWD probes, or resvg file/system-font APIs. Opt-in host-only convenience headers (`plugins/SVG/SVGFile.hpp`, `plugins/lua/ReflectLuaFile.hpp`) are explicitly separated for host binaries/tools/tests and forbidden inside `plugins/` by `configure/check_plugin_fs_boundary.py`.
+   * **Plugins never touch the host OS filesystem directly**: `plugins/AssetCooking`, `plugins/Fonts`, `plugins/glTF`, `plugins/BSP` (`SourceVFS`), `plugins/SVG` (`ISvgRasterizer` / `SVG.hpp`), and core `plugins/lua/Lua.hpp` read exclusively through `FS::VirtualFileSystem`, `COM::IAssetLibrary`, or caller-supplied byte spans — never `<filesystem>`, `<fstream>`, `FS::Paths`, CWD probes, or resvg file/system-font APIs. Lua script sources enter through exactly two doors: `FromAsset` (engine VFS) and `FromString` (in-memory text or byte spans); there is no Lua disk-open wrapper. Text-only chunk loading also rejects the ESC bytecode signature explicitly, since LuaJIT does not validate bytecode. The one opt-in host-only convenience header (`plugins/SVG/SVGFile.hpp`) is forbidden inside `plugins/` by `configure/check_plugin_fs_boundary.py`.
 
 ---
 
