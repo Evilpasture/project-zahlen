@@ -343,6 +343,10 @@ static_assert(std::is_standard_layout_v<TriangleMesh> && std::is_trivially_copya
 static_assert(std::is_standard_layout_v<MeshAsset> && std::is_trivially_copyable_v<MeshAsset>);
 static_assert(std::is_standard_layout_v<HeightField> && std::is_trivially_copyable_v<HeightField>);
 static_assert(std::is_standard_layout_v<Compound> && std::is_trivially_copyable_v<Compound>);
-static_assert(std::is_trivially_copyable_v<decltype(MakeCompound(Placed<Sphere> {Sphere {}}))>);
+// Stamped child payloads must be chain-safe. FixedCompound itself is
+// deliberately NOT asserted trivially copyable: libstdc++'s std::tuple is
+// not (user-provided copy constructor), and the type never travels a chain
+// -- MakeNodes() stamps payloads that live in the caller's frame.
+static_assert(COM::ChainPayload<Placed<Sphere>>);
 
 } // namespace ZHLN::Physics
