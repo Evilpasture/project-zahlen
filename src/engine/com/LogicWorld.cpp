@@ -107,11 +107,11 @@ template <typename NodeT>
     } else if constexpr (std::is_same_v<NodeT, Physics::Plane>) {
         built = node;
     } else if constexpr (std::is_same_v<NodeT, Physics::TriangleMesh>) {
-        if (node.vertices.size() < 3U || node.indices.size() < 3U || (node.indices.size() % 3U) != 0U) {
+        if (node.vertices.size < 3U || node.indices.size < 3U || (node.indices.size % 3U) != 0U) {
             return Error::InvalidArgument;
         }
         for (const uint32_t index: node.indices) {
-            if (index >= node.vertices.size()) return Error::InvalidArgument;
+            if (index >= node.vertices.size) return Error::InvalidArgument;
         }
         built = node;
     } else if constexpr (std::is_same_v<NodeT, Physics::MeshAsset>) {
@@ -121,7 +121,7 @@ template <typename NodeT>
     } else if constexpr (std::is_same_v<NodeT, Physics::HeightField>) {
         if (node.sampleCount < 2U || node.worldSize <= 0.0F) return Error::InvalidArgument;
         const size_t totalSamples = static_cast<size_t>(node.sampleCount) * node.sampleCount;
-        if (node.heights.size() < totalSamples) return Error::InvalidArgument;
+        if (node.heights.size < totalSamples) return Error::InvalidArgument;
         built = node;
     } else if constexpr (std::is_same_v<NodeT, Physics::Compound>) {
         // Children are validated by the caller's role policy

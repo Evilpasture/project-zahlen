@@ -57,8 +57,10 @@ auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const DistanceConstrai
 
 auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const HingeConstraint& p) -> JPH::Constraint* {
     JPH::HingeConstraintSettings settings;
-    // Local frames: the joint sits at each body's origin around its local Y.
-    settings.mSpace     = JPH::EConstraintSpace::LocalSpace;
+    // Local frames (Jolt: LocalToBodyCOM): the joint sits at each body's
+    // local zero -- its centre of mass, equal to the origin for the centred
+    // shapes we spawn -- around its local Y.
+    settings.mSpace     = JPH::EConstraintSpace::LocalToBodyCOM;
     settings.mPoint1    = JPH::RVec3::sZero();
     settings.mPoint2    = JPH::RVec3::sZero();
     settings.mHingeAxis1 = settings.mHingeAxis2 = JPH::Vec3::sAxisY();
@@ -85,7 +87,7 @@ auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const HingeConstraint&
 
 auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const SliderConstraint& p) -> JPH::Constraint* {
     JPH::SliderConstraintSettings settings;
-    settings.mSpace     = JPH::EConstraintSpace::LocalSpace;
+    settings.mSpace     = JPH::EConstraintSpace::LocalToBodyCOM;
     settings.mPoint1    = JPH::RVec3::sZero();
     settings.mPoint2    = JPH::RVec3::sZero();
     settings.mSliderAxis1 = settings.mSliderAxis2 = JPH::Vec3::sAxisX();
@@ -112,7 +114,7 @@ auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const SliderConstraint
 
 auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const ConeConstraint& p) -> JPH::Constraint* {
     JPH::ConeConstraintSettings settings;
-    settings.mSpace        = JPH::EConstraintSpace::LocalSpace;
+    settings.mSpace        = JPH::EConstraintSpace::LocalToBodyCOM;
     settings.mPoint1       = JPH::RVec3::sZero();
     settings.mPoint2       = JPH::RVec3::sZero();
     settings.mTwistAxis1   = settings.mTwistAxis2 = JPH::Vec3::sAxisY();

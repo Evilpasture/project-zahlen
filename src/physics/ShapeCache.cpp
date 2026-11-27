@@ -131,17 +131,17 @@ auto ShapeCache::Resolve(const Plane& shape) -> JPH::ShapeRefC {
 }
 
 auto ShapeCache::Resolve(const TriangleMesh& shape) -> JPH::ShapeRefC {
-    if (shape.vertices.size() > UINT32_MAX || shape.indices.size() > UINT32_MAX) return nullptr;
-    for (auto index: shape.indices) if (index >= shape.vertices.size()) return nullptr;
+    if (shape.vertices.size > UINT32_MAX || shape.indices.size > UINT32_MAX) return nullptr;
+    for (auto index: shape.indices) if (index >= shape.vertices.size) return nullptr;
     // Hash borrowed data once, outside the cache lock. No input
     // storage or pointers are retained in the cache. Fingerprint
     // equality is probabilistic (hash collisions cannot be checked
     // exactly without retaining or reloading the source geometry).
     static_assert(sizeof(FVec3) == 3 * sizeof(float));
     const MeshKey key {
-        Hash64(reinterpret_cast<const char*>(shape.vertices.data()), shape.vertices.size * sizeof(FVec3)),
-        Hash64(reinterpret_cast<const char*>(shape.indices.data()), shape.indices.size * sizeof(uint32_t)),
-        static_cast<uint32_t>(shape.vertices.size()), static_cast<uint32_t>(shape.indices.size())
+        Hash64(reinterpret_cast<const char*>(shape.vertices.data), shape.vertices.size * sizeof(FVec3)),
+        Hash64(reinterpret_cast<const char*>(shape.indices.data), shape.indices.size * sizeof(uint32_t)),
+        static_cast<uint32_t>(shape.vertices.size), static_cast<uint32_t>(shape.indices.size)
     };
     {
         ZHLN::MutexGuard guard(mutex);
@@ -180,8 +180,8 @@ auto ShapeCache::Resolve(const MeshAsset& shape) -> JPH::ShapeRefC {
 }
 
 auto ShapeCache::Resolve(const HeightField& shape) -> JPH::ShapeRefC {
-    if (shape.sampleCount < 2 || shape.heights.size() < static_cast<size_t>(shape.sampleCount) * shape.sampleCount) return nullptr;
-    return Physics::CreateHeightFieldShape(shape.heights.data(), static_cast<int>(shape.sampleCount), shape.worldSize);
+    if (shape.sampleCount < 2 || shape.heights.size < static_cast<size_t>(shape.sampleCount) * shape.sampleCount) return nullptr;
+    return Physics::CreateHeightFieldShape(shape.heights.data, static_cast<int>(shape.sampleCount), shape.worldSize);
 }
 
 namespace {
