@@ -10,7 +10,6 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Audio/AudioValues.hpp>
-#include <Zahlen/COM/Types.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
@@ -20,6 +19,7 @@
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
 #include <Zahlen/COM/IState.hpp>
+#include <Zahlen/COM/Types.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
@@ -40,7 +40,6 @@
 #include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Render/Vertex.hpp>
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -53,14 +52,27 @@
 #include <vector>
 
 namespace COMNameTest {
-struct Outer { struct Value {}; };
-namespace Other { struct Value {}; }
-template <typename T, int N> struct Component { T value[N > 0 ? N : 1]; };
-template <typename T> struct OuterTemplate { struct Value {}; };
-template <auto V> struct Value {};
+struct Outer {
+    struct Value {};
+};
+namespace Other {
+struct Value {};
+} // namespace Other
+template <typename T, int N>
+struct Component {
+    T value[N > 0 ? N : 1];
+};
+template <typename T>
+struct OuterTemplate {
+    struct Value {};
+};
+template <auto V>
+struct Value {};
 enum class Sign : int { Negative = -3 };
-template <template <typename> class T> struct TemplateArg {};
-template <typename T> struct TypeArg {};
+template <template <typename> class T>
+struct TemplateArg {};
+template <typename T>
+struct TypeArg {};
 } // namespace COMNameTest
 
 static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::Value<-3>>() == "COMNameTest::Value<V{int:-3}>");
@@ -71,8 +83,13 @@ static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::TypeArg<int[3]>>() =
 static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::TemplateArg<COMNameTest::TypeArg>>() == "COMNameTest::TemplateArg<M{COMNameTest::TypeArg}>");
 static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::Component<int, 2>>() == "COMNameTest::Component<T{int}V{int:2}>");
 static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::Component<int, 2>>() != ZHLN::Reflect::CanonicalTypeName<COMNameTest::Component<int, 3>>());
-static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::OuterTemplate<int>::Value>() != ZHLN::Reflect::CanonicalTypeName<COMNameTest::OuterTemplate<float>::Value>());
-static_assert(std::string_view(ZHLN::COM::IEntities::ComponentName<COMNameTest::Component<int, 2>>()) == ZHLN::Reflect::CanonicalTypeName<COMNameTest::Component<int, 2>>());
+static_assert(
+    ZHLN::Reflect::CanonicalTypeName<COMNameTest::OuterTemplate<int>::Value>() != ZHLN::Reflect::CanonicalTypeName<COMNameTest::OuterTemplate<float>::Value>()
+);
+static_assert(
+    std::string_view(ZHLN::COM::IEntities::ComponentName<COMNameTest::Component<int, 2>>()) ==
+    ZHLN::Reflect::CanonicalTypeName<COMNameTest::Component<int, 2>>()
+);
 static_assert(std::string_view(ZHLN::COM::IEntities::ComponentName<COMNameTest::Outer::Value>()) == "COMNameTest::Outer::Value");
 static_assert(std::string_view(ZHLN::COM::IEntities::ComponentName<COMNameTest::Other::Value>()) == "COMNameTest::Other::Value");
 
@@ -133,7 +150,7 @@ namespace AuditProbe {
 struct ContainerOnTheWire {
     virtual auto Bodies() const noexcept -> std::vector<uint32_t> = 0;
 
-protected:
+  protected:
     ~ContainerOnTheWire() = default;
 };
 
@@ -148,7 +165,7 @@ struct ContainerInTheHeader {
         return bodies;
     }
 
-protected:
+  protected:
     ~ContainerInTheHeader() = default;
 };
 
@@ -244,11 +261,13 @@ void CheckGraphics(ZHLN::COM::IGraphicsDevice& graphics, ZHLN::COM::IAssetLibrar
     }
 
     // Material creation, registration, lookup and unregistration.
-    const auto matRes = graphics.CreateMaterial(ZHLN::COM::PbrMaterialConfig {
-        .baseColor = {0.9F, 0.2F, 0.1F, 1.0F},
-        .metallic  = 0.1F,
-        .roughness = 0.4F,
-    });
+    const auto matRes = graphics.CreateMaterial(
+        ZHLN::COM::PbrMaterialConfig {
+            .baseColor = {0.9F, 0.2F, 0.1F, 1.0F},
+            .metallic  = 0.1F,
+            .roughness = 0.4F,
+        }
+    );
     if (matRes.HasValue()) {
         const ZHLN::MaterialID matKey = assets.AssetHash("com_boundary_mat");
         graphics.RegisterMaterial(matKey, matRes.value);
@@ -275,10 +294,12 @@ void CheckGraphics(ZHLN::COM::IGraphicsDevice& graphics, ZHLN::COM::IAssetLibrar
         ZHLN::VertexPosition {{0.0F, 1.0F, 0.0F}},
     };
     const std::array<uint32_t, 3> triIdx {0U, 1U, 2U};
-    const auto rawMeshRes = graphics.UploadMesh(ZHLN::COM::MeshStreamsDesc {
-        .positions = std::span<const ZHLN::VertexPosition> {triPos},
-        .indices32 = std::span<const uint32_t> {triIdx},
-    });
+    const auto                    rawMeshRes = graphics.UploadMesh(
+        ZHLN::COM::MeshStreamsDesc {
+            .positions = std::span<const ZHLN::VertexPosition> {triPos},
+            .indices32 = std::span<const uint32_t> {triIdx},
+        }
+    );
     if (ZHLN::Test::ExpectTrue(rawMeshRes.HasValue())) {
         ZHLN::Test::ExpectEq(rawMeshRes.value.vertexCount, uint32_t {3});
         ZHLN::Test::ExpectEq(rawMeshRes.value.indexCount, uint32_t {3});
@@ -302,15 +323,16 @@ void CheckSimulation(ZHLN::COM::ISimulation& simulation) {
     const std::vector<ZHLN::Physics::BodyID> nearby = simulation.BodiesInSphere(ZHLN::DVec3 {0.0, 0.0, 0.0}, 50.0F);
     ZHLN::Test::ExpectTrue(nearby.empty());
 
-    const ZHLN::Physics::RaycastResult miss =
-        simulation.Raycast(ZHLN::DVec3 {0.0, 100.0, 0.0}, ZHLN::FVec3 {0.0F, -1.0F, 0.0F});
+    const ZHLN::Physics::RaycastResult miss = simulation.Raycast(ZHLN::DVec3 {0.0, 100.0, 0.0}, ZHLN::FVec3 {0.0F, -1.0F, 0.0F});
     ZHLN::Test::ExpectTrue(!miss.hasHit);
 
     // Chained rigid bodies: static floor box, dynamic sphere, and compound shape.
-    const auto floorRes = simulation.CreateStaticBodyRaw(ZHLN::COM::InChain(
-        ZHLN::Physics::Box {.halfExtents = {10.0F, 0.5F, 10.0F}},
-        ZHLN::Physics::StaticBody {.position = {0.0, -0.5, 0.0}},
-        ZHLN::Physics::SurfaceMaterial {.friction = 0.8F, .restitution = 0.1F}));
+    const auto floorRes = simulation.CreateStaticBodyRaw(
+        ZHLN::COM::InChain(
+            ZHLN::Physics::Box {.halfExtents = {10.0F, 0.5F, 10.0F}}, ZHLN::Physics::StaticBody {.position = {0.0, -0.5, 0.0}},
+            ZHLN::Physics::SurfaceMaterial {.friction = 0.8F, .restitution = 0.1F}
+        )
+    );
     ZHLN::Test::ExpectTrue(floorRes.HasValue());
 
     const auto sphereRes = simulation.CreateSphereBody(0.5F, ZHLN::Physics::DynamicBody {.position = {0.0, 4.0, 0.0}});
@@ -318,32 +340,33 @@ void CheckSimulation(ZHLN::COM::ISimulation& simulation) {
 
     const auto compoundRes = simulation.CreateBody(
         ZHLN::Physics::MakeCompound(
-            ZHLN::Physics::Placed<ZHLN::Physics::Box> {ZHLN::Physics::Box {{0.25F, 0.25F, 0.25F}},
-                                                       {-0.5F, 0.0F, 0.0F}},
-            ZHLN::Physics::Placed<ZHLN::Physics::Sphere> {ZHLN::Physics::Sphere {0.25F}, {0.5F, 0.0F, 0.0F}}),
-        ZHLN::Physics::DynamicBody {.position = {3.0, 2.0, 0.0}});
+            ZHLN::Physics::Placed<ZHLN::Physics::Box> {ZHLN::Physics::Box {{0.25F, 0.25F, 0.25F}}, {-0.5F, 0.0F, 0.0F}},
+            ZHLN::Physics::Placed<ZHLN::Physics::Sphere> {ZHLN::Physics::Sphere {0.25F}, {0.5F, 0.0F, 0.0F}}
+        ),
+        ZHLN::Physics::DynamicBody {.position = {3.0, 2.0, 0.0}}
+    );
     ZHLN::Test::ExpectTrue(compoundRes.HasValue());
 
     if (floorRes.HasValue() && sphereRes.HasValue() && compoundRes.HasValue()) {
-        simulation.SetVelocity(sphereRes.value, FVec3 {0.0F, -2.0F, 0.0F});
+        simulation.SetVelocity(sphereRes.value, ZHLN::FVec3 {0.0F, -2.0F, 0.0F});
         simulation.Step(1.0F / 60.0F);
         ZHLN::Test::ExpectTrue(simulation.BodyLinearVelocity(sphereRes.value).HasValue());
 
-        const ZHLN::Physics::RaycastResult hit =
-            simulation.Raycast(ZHLN::DVec3 {0.0, 10.0, 0.0}, ZHLN::FVec3 {0.0F, -1.0F, 0.0F});
+        const ZHLN::Physics::RaycastResult hit = simulation.Raycast(ZHLN::DVec3 {0.0, 10.0, 0.0}, ZHLN::FVec3 {0.0F, -1.0F, 0.0F});
         ZHLN::Test::ExpectTrue(hit.hasHit);
         ZHLN::Test::ExpectTrue(hit.bodyID == sphereRes.value);
 
-        const auto charRes = simulation.CreateCharacterRaw(ZHLN::COM::InChain(
-            ZHLN::Physics::Capsule {.halfHeight = 0.85F, .radius = 0.35F},
-            ZHLN::Physics::CharacterBody {.position = {-3.0, 2.0, 0.0}}));
+        const auto charRes = simulation.CreateCharacterRaw(
+            ZHLN::COM::InChain(ZHLN::Physics::Capsule {.halfHeight = 0.85F, .radius = 0.35F}, ZHLN::Physics::CharacterBody {.position = {-3.0, 2.0, 0.0}})
+        );
         ZHLN::Test::ExpectTrue(charRes.HasValue());
 
         const std::array<ZHLN::Physics::BodyID, 3> cleanup {
-            ZHLN::Physics::BodyID(floorRes.value), ZHLN::Physics::BodyID(sphereRes.value),
-            ZHLN::Physics::BodyID(compoundRes.value)};
+            ZHLN::Physics::BodyID(floorRes.value), ZHLN::Physics::BodyID(sphereRes.value), ZHLN::Physics::BodyID(compoundRes.value)
+        };
         simulation.DestroyBodies(cleanup);
-        if (charRes.HasValue()) simulation.DestroyBody(charRes.value);
+        if (charRes.HasValue())
+            simulation.DestroyBody(charRes.value);
     }
 
     const ZHLN::Physics::DebugDrawData debug = simulation.DebugGeometry();
@@ -445,7 +468,7 @@ void CheckActions(ZHLN::COM::IActionContext& actions) {
     ZHLN::Test::ExpectTrue(actions.IsActionMapEnabled("Gameplay"));
 
     const std::array<ZHLN::InputBinding, 1> jumpBindings {ZHLN::InputBinding::Key(ZHLN::KeyCode::Space)};
-    const auto jumpRes = actions.AddAction("Gameplay", "Jump", ZHLN::ActionKind::Digital, jumpBindings);
+    const auto                              jumpRes = actions.AddAction("Gameplay", "Jump", ZHLN::ActionKind::Digital, jumpBindings);
     if (ZHLN::Test::ExpectTrue(jumpRes.HasValue())) {
         const ZHLN::ActionID jumpId = jumpRes.value;
 
@@ -454,9 +477,7 @@ void CheckActions(ZHLN::COM::IActionContext& actions) {
         ZHLN::Test::ExpectTrue(!actions.ActionDown(jumpId, ZHLN::kPrimarySeat));
         ZHLN::Test::ExpectTrue(!actions.ActionPressed(jumpId, ZHLN::kPrimarySeat));
 
-        ZHLN::Test::ExpectTrue(
-            actions.AddBinding("Gameplay", jumpId, ZHLN::InputBinding::GamepadBtn(ZHLN::GamepadButton::North))
-                .HasValue());
+        ZHLN::Test::ExpectTrue(actions.AddBinding("Gameplay", jumpId, ZHLN::InputBinding::GamepadBtn(ZHLN::GamepadButton::North)).HasValue());
         ZHLN::Test::ExpectTrue(actions.Rebind("Gameplay", jumpId, 0U, ZHLN::InputBinding::Key(ZHLN::KeyCode::E)).HasValue());
         actions.SnapshotDefaults();
 
@@ -495,15 +516,14 @@ void CheckEngineComponents(ZHLN::COM::IEntities& entities, ZHLN::COM::ISimulatio
     transform.world.m[0]    = 2.0F;
     transform.previous.m[5] = 3.0F;
 
-    void* attached = entities.AttachEngineRaw(entity, "ZHLN::Components::WorldTransformComponent",
-                                              sizeof(ConsumerSide::WorldTransformComponent),
-                                              alignof(ConsumerSide::WorldTransformComponent),
-                                              ZHLN::Reflect::LayoutHash<ConsumerSide::WorldTransformComponent>());
+    void* attached = entities.AttachEngineRaw(
+        entity, "ZHLN::Components::WorldTransformComponent", sizeof(ConsumerSide::WorldTransformComponent), alignof(ConsumerSide::WorldTransformComponent),
+        ZHLN::Reflect::LayoutHash<ConsumerSide::WorldTransformComponent>()
+    );
     if (ZHLN::Test::ExpectTrue(attached != nullptr)) {
         *static_cast<ConsumerSide::WorldTransformComponent*>(attached) = transform;
 
-        auto* fetched = static_cast<ConsumerSide::WorldTransformComponent*>(
-            entities.GetEngineRaw(entity, "ZHLN::Components::WorldTransformComponent"));
+        auto* fetched = static_cast<ConsumerSide::WorldTransformComponent*>(entities.GetEngineRaw(entity, "ZHLN::Components::WorldTransformComponent"));
         if (ZHLN::Test::ExpectTrue(fetched != nullptr)) {
             ZHLN::Test::ExpectEq(fetched->world.m[0], 2.0F);
             ZHLN::Test::ExpectEq(fetched->previous.m[5], 3.0F);
@@ -515,29 +535,28 @@ void CheckEngineComponents(ZHLN::COM::IEntities& entities, ZHLN::COM::ISimulatio
     // destroy the underlying Jolt body rather than leaking it.
     const auto sphereBody = simulation.CreateSphereBody(0.5F, ZHLN::Physics::DynamicBody {.position = {0.0, 8.0, 0.0}});
     if (ZHLN::Test::ExpectTrue(sphereBody.HasValue())) {
-        void* physSlot = entities.AttachEngineRaw(entity, "ZHLN::Components::PhysicsComponent",
-                                                  sizeof(ConsumerSide::PhysicsComponent),
-                                                  alignof(ConsumerSide::PhysicsComponent),
-                                                  ZHLN::Reflect::LayoutHash<ConsumerSide::PhysicsComponent>());
+        void* physSlot = entities.AttachEngineRaw(
+            entity, "ZHLN::Components::PhysicsComponent", sizeof(ConsumerSide::PhysicsComponent), alignof(ConsumerSide::PhysicsComponent),
+            ZHLN::Reflect::LayoutHash<ConsumerSide::PhysicsComponent>()
+        );
         if (ZHLN::Test::ExpectTrue(physSlot != nullptr)) {
-            *static_cast<ConsumerSide::PhysicsComponent*>(physSlot) =
-                ConsumerSide::PhysicsComponent {.physicsID = sphereBody.value, .isStatic = false};
+            *static_cast<ConsumerSide::PhysicsComponent*>(physSlot) = ConsumerSide::PhysicsComponent {.physicsID = sphereBody.value, .isStatic = false};
             ZHLN::Test::ExpectTrue(entities.DetachEngineRaw(entity, "ZHLN::Components::PhysicsComponent"));
             ZHLN::Test::ExpectTrue(!simulation.BodyPosition(sphereBody.value).HasValue());
         }
     }
 
     // Mismatched size or hash is refused closed.
-    void* mismatched = entities.AttachEngineRaw(entity, "ZHLN::Components::MeshComponent",
-                                                sizeof(ConsumerSide::MeshComponent),
-                                                alignof(ConsumerSide::MeshComponent),
-                                                ZHLN::Reflect::LayoutHash<ConsumerSide::MeshComponent>());
+    void* mismatched = entities.AttachEngineRaw(
+        entity, "ZHLN::Components::MeshComponent", sizeof(ConsumerSide::MeshComponent), alignof(ConsumerSide::MeshComponent),
+        ZHLN::Reflect::LayoutHash<ConsumerSide::MeshComponent>()
+    );
     ZHLN::Test::ExpectTrue(mismatched == nullptr);
 
-    void* sameSizeLie = entities.AttachEngineRaw(entity, "ZHLN::Components::WorldTransformComponent",
-                                                 sizeof(ConsumerSide::WorldTransformComponent),
-                                                 alignof(ConsumerSide::WorldTransformComponent),
-                                                 ZHLN::Reflect::LayoutHash<ConsumerSide::WorldTransformComponent>() ^ 1ULL);
+    void* sameSizeLie = entities.AttachEngineRaw(
+        entity, "ZHLN::Components::WorldTransformComponent", sizeof(ConsumerSide::WorldTransformComponent), alignof(ConsumerSide::WorldTransformComponent),
+        ZHLN::Reflect::LayoutHash<ConsumerSide::WorldTransformComponent>() ^ 1ULL
+    );
     ZHLN::Test::ExpectTrue(sameSizeLie == nullptr);
 
     ZHLN::Test::ExpectTrue(entities.DetachEngineRaw(entity, "ZHLN::Components::WorldTransformComponent"));
@@ -550,13 +569,12 @@ void CheckEngineComponents(ZHLN::COM::IEntities& entities, ZHLN::COM::ISimulatio
 struct COMBoundarySuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> create_engine_validates_config_chains_before_device_init() {
-            const auto unknownRes =
-                ZHLN::COM::CreateEngineRaw(ZHLN::COM::InChain(COMIdentityTest::UnknownEngineSlice {}));
+            const auto unknownRes = ZHLN::COM::CreateEngineRaw(ZHLN::COM::InChain(COMIdentityTest::UnknownEngineSlice {}));
             ZHLN::Test::ExpectTrue(!unknownRes.HasValue());
             ZHLN::Test::ExpectTrue(unknownRes.error == ZHLN::COM::Error::UnsupportedExtension);
 
             ZHLN::COM::WindowConfig winPayload {.headless = true};
-            ZHLN::COM::ChainInNode        drifted {
+            ZHLN::COM::ChainInNode  drifted {
                 .sType      = ZHLN::COM::ChainTypeID<ZHLN::COM::WindowConfig>(),
                 .layoutHash = ZHLN::Reflect::LayoutHash<ZHLN::COM::WindowConfig>() ^ 0x1ULL,
                 .size       = sizeof(ZHLN::COM::WindowConfig),
@@ -571,20 +589,23 @@ struct COMBoundarySuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> the_com_boundary_works_end_to_end() {
-            auto created = ZHLN::COM::CreateEngine(ZHLN::COM::InChain(
-                ZHLN::COM::AppConfig {
-                    .appName  = ZHLN::String64("COM boundary test"),
-                    .logLevel = ZHLN::LogLevel::Quiet,
-                },
-                ZHLN::COM::WindowConfig {
-                    .width    = 320,
-                    .height   = 240,
-                    .vsync    = false,
-                    .headless = true,
-                },
-                ZHLN::COM::RenderConfig {
-                    .validationMode = ZHLN::ValidationMode::Off,
-                }));
+            auto created = ZHLN::COM::CreateEngine(
+                ZHLN::COM::InChain(
+                    ZHLN::COM::AppConfig {
+                        .appName  = ZHLN::String64("COM boundary test"),
+                        .logLevel = ZHLN::LogLevel::Quiet,
+                    },
+                    ZHLN::COM::WindowConfig {
+                        .width    = 320,
+                        .height   = 240,
+                        .vsync    = false,
+                        .headless = true,
+                    },
+                    ZHLN::COM::RenderConfig {
+                        .validationMode = ZHLN::ValidationMode::Off,
+                    }
+                )
+            );
             if (!created.has_value()) {
                 ZHLN::Test::ExpectTrue(created.error() != ZHLN::ErrorCode {});
                 return {};
