@@ -32,9 +32,7 @@ enum class CommandType : uint8_t {
     SetCharacterPosition,
     SetKinematicPose,
     AddImpulse,
-    AddImpulseAtPosition,
     CreateConstraint,
-    DestroyConstraint,
     SetConstraintTarget,
 };
 
@@ -108,15 +106,6 @@ struct SetKinematicPosePayload {
     float      rw;
 };
 
-struct AddImpulseAtPosPayload {
-    BodyID bodyID;
-    JPH::Real  px;
-    JPH::Real  py;
-    JPH::Real  pz;
-    float      ix;
-    float      iy;
-    float      iz;
-};
 
 struct CreateConstraintPayload {
     ConstraintID constraintID;
@@ -135,14 +124,12 @@ struct SetConstraintTargetPayload {
 union CommandPayload {
     uint8_t                    empty {};
     BodyID                 bodyID;
-    ConstraintID           constraintID;
     CreateRigidPayload         createRigid;
     CreateCharacterPayload     createChar;
     SetFilterPayload           setFilter;
     SetVelocityPayload         setVelocity;
     SetPositionPayload         setPosition;
     SetKinematicPosePayload    setKinematicPose;
-    AddImpulseAtPosPayload     addImpulseAtPos;
     CreateConstraintPayload    createConstraint;
     SetConstraintTargetPayload setConstraintTarget;
 };

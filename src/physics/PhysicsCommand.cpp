@@ -206,16 +206,6 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                 break;
             }
 
-            case CommandType::AddImpulseAtPosition: {
-                const auto&       c  = cmd.payload.addImpulseAtPos;
-                const JPH::BodyID id = GetBodyID(*this, c.bodyID);
-                if (!id.IsInvalid()) {
-                    bodyInterface->AddImpulse(id, JPH::Vec3(c.ix, c.iy, c.iz), JPH::RVec3(c.px, c.py, c.pz));
-                    bodyInterface->ActivateBody(id);
-                }
-                break;
-            }
-
             case CommandType::CreateConstraint: {
                 const auto&       c   = cmd.payload.createConstraint;
                 const JPH::BodyID id1 = GetBodyID(*this, c.b1);
@@ -238,19 +228,6 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                         const uint32_t slot    = c.constraintID.index;
                         constraints[slot]      = joltConstraint;
                         constraintStates[slot] = SlotState::Alive;
-                    }
-                }
-                break;
-            }
-
-            case CommandType::DestroyConstraint: {
-                const uint32_t slot = cmd.payload.constraintID.index;
-                if (slot < constraintCapacity && constraintGenerations[slot].load(std::memory_order::acquire) == cmd.payload.constraintID.generation) {
-                    if (constraints[slot] != nullptr) {
-                        system->RemoveConstraint(constraints[slot]);
-                        constraints[slot]->Release();
-                        constraints[slot] = nullptr;
-                        RemoveConstraintSlot(slot);
                     }
                 }
                 break;

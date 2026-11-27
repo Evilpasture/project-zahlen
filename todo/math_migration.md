@@ -28,12 +28,14 @@ conventions, units, precision and wire/ABI compatibility when addressing them.
   `include/Zahlen/Math/Math3D.hpp` still has Jolt-based transform helpers and
   `TransformTRS`; determine which are real physics boundaries before changing
   them.
-- **Physics boundary mismatch:** `PhysicsContext::SetKinematicPose` and body
-  creation APIs in `include/Zahlen/Physics/Physics.hpp` accept quaternion
-  lanes as `FVec4`, so native `Quat` callers such as
-  `src/engine/PrefabFactory.cpp` explicitly use `AsVec4()`. Consider a deliberate
-  interface migration to `Quat`, with conversion to Jolt inside physics; do not
-  bypass `PhysicsContext` shape factories or introduce implicit conversions.
+- **Physics boundary mismatch:** body creation migrated already: the role
+  structs (`StaticBody`, `KinematicBody`, `DynamicBody` in
+  `include/Zahlen/Physics/PhysicsValues.hpp`) carry native `Quat`, with the
+  conversion to Jolt inside `PhysicsContext`. The one remaining `FVec4` lane
+  is `PhysicsContext::SetPose(KinematicBodyID, ...)`; the ISimulation facade
+  takes `Quat` and the engine facades forward with `AsVec4()`. Finish the
+  deliberate migration by moving that lane to `Quat` too; do not bypass
+  `PhysicsContext` shape factories or introduce implicit conversions.
 - **Imported animation data:** `extensions/Animation/Context.cpp`
   constructs quaternions from four scalar samples. Those arrays are an asset
   format boundary; review whether their representation can be typed without
