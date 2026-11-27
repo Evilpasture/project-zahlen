@@ -72,8 +72,8 @@ World uploads retain:
 `PrefabPartInfo::additionalMeshCollision` is the narrow fixed-layout descriptor
 addition for that final case. Core resolves the copied collision ID and builds
 its own compound shape. A missing base shape or uncached extra collision is
-rejected before prefab registration. No native Physics::AnyShape, registry or
-renderer escapes. The reflected descriptor layout changes; rebuild both sides.
+rejected before prefab registration. No native physics shape type, registry
+or renderer escapes. The reflected descriptor layout changes; rebuild both sides.
 No Core/COM protocol or capability vtable changes are involved.
 
 Each upload validates streams before GPU allocation. On later upload/material/
