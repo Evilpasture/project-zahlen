@@ -54,13 +54,12 @@ struct RenderPipelinesTestSuite {
                 .indices  = ZHLN::COM::Span<const uint32_t>(indices.data(), indices.size()),
             })).HasValue());
             auto& physics = *engine->Simulation();
-            const auto body = physics.CreateRigidBody(
+            const auto body = physics.CreateStaticBodyRaw(
                 ZHLN::COM::InChain(
                     ZHLN::Physics::MeshAsset {.id = id},
-                    ZHLN::Physics::RigidBodyPose {
-                        .position   = ZHLN::DVec3 {0, 0, 0},
-                        .rotation   = ZHLN::Quat::Identity(),
-                        .motionType = ZHLN::Physics::MotionType::Static,
+                    ZHLN::Physics::StaticBody {
+                        .position = ZHLN::DVec3 {0, 0, 0},
+                        .rotation = ZHLN::Quat::Identity(),
                     }
                 )
             );
@@ -358,10 +357,9 @@ struct RenderPipelinesTestSuite {
             for (int i = 0; i < 12; ++i) {
                 const auto handle = physics.CreateBoxBody(
                     ZHLN::FVec3 {0.25f, 0.25f, 0.25f},
-                    ZHLN::Physics::RigidBodyPose {
-                        .position   = ZHLN::DVec3 {static_cast<double>(i), 1.0, 0.0},
-                        .rotation   = ZHLN::Quat::Identity(),
-                        .motionType = ZHLN::Physics::MotionType::Dynamic,
+                    ZHLN::Physics::DynamicBody {
+                        .position = ZHLN::DVec3 {static_cast<double>(i), 1.0, 0.0},
+                        .rotation = ZHLN::Quat::Identity(),
                     }
                 ).value;
                 handles.push_back(handle);

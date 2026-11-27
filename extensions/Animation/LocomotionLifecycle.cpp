@@ -32,15 +32,15 @@ namespace ZHLN::Locomotion {
 namespace {
 
 [[nodiscard]] auto CreateCharacterBody(COM::ISimulation& sim, FVec3 footPosition, const Physics::DualShape& config) -> Physics::BodyID {
-    const Physics::CharacterCreateDesc desc {
+    const Physics::CharacterBody role {
         .position                 = footPosition.Cast<double>(),
-        .maxSlopeRadians     = DegF {50.0f}.ToRadians().value,
+        .maxSlopeAngle            = DegF {50.0f}.ToRadians(),
         .maxStrength              = 120.0f,
-        .characterPadding         = 0.02f,
+        .padding                  = 0.02f,
         .penetrationRecoverySpeed = 1.0f,
     };
-    const auto res = sim.CreateCharacter(COM::InChain(desc, config));
-    return res.HasValue() ? res.value : Physics::BodyID {};
+    const auto res = sim.CreateCharacterRaw(COM::InChain(config, role));
+    return res.HasValue() ? Physics::BodyID(res.value) : Physics::BodyID {};
 }
 
 [[nodiscard]] auto FindActiveCamera(const COM::IEntities& entities) -> Entity {

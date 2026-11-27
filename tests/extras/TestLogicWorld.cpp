@@ -11,8 +11,8 @@ using namespace ZHLN;
 using Test::ExpectEq;
 using Test::ExpectTrue;
 auto Body(COM::ISimulation& sim, DVec3 position = {0, 8, 0}) {
-    return sim.CreateRigidBody(
-        COM::InChain(Physics::Box {}, Physics::RigidBodyPose {.position = position, .motionType = Physics::MotionType::Dynamic})
+    return sim.CreateDynamicBodyRaw(
+        COM::InChain(Physics::Box {}, Physics::DynamicBody {.position = position})
     );
 }
 struct LogicWorldSuite {

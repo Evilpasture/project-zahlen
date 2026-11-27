@@ -1215,7 +1215,11 @@ void ClientSession::SendRealtimeFrame(COM::IEngine& engine) {
         if (const auto bodyState = physics.BodyState(m_localControllerBody); bodyState.HasValue() && bodyState.value.valid) {
             const auto& state    = bodyState.value;
             const Quat  rotation = (movement != nullptr ? movement->orientation : Quat {state.currentRotation}).Normalized();
-            const auto velocity = physics.CharacterVelocity(m_localControllerBody);
+
+            FVec3       velocity = FVec3::Zero();
+            if (const auto charBody = physics.AsCharacter(m_localControllerBody)) {
+                velocity = physics.CharacterVelocity(*charBody);
+            }
             owned.Set("controllerState", FloatArray({
                 state.currentPosition.x, state.currentPosition.y, state.currentPosition.z,
                 rotation.x, rotation.y, rotation.z, rotation.w,

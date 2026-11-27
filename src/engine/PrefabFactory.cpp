@@ -169,38 +169,58 @@ auto InstantiateMeshPart(
 
     auto body = Physics::BodyID::Null();
     if (params.createPhysics && prep.shape != nullptr) {
-        const auto motion = params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static)
-                                                   : Physics::MotionType::Dynamic;
-        const auto layer = (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving
-                                                                                  : Physics::ObjectLayer::Moving;
-        const auto activation = (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate
-                                                                               : Physics::Activation::Activate;
-        body = std::visit(
-            [&](const auto& collider) -> Physics::BodyID {
+        // Collider -> runtime shape first, then the role decides whether the
+        // shape family is allowed (a dynamic model with a mesh collider has
+        // no legal role and spawns nothing, exactly as Jolt would have
+        // rejected it before).
+        const auto colliderShape = std::visit(
+            [](const auto& collider) -> std::optional<Physics::ShapeVariant> {
                 using C = std::remove_cvref_t<decltype(collider)>;
                 if constexpr (std::is_same_v<C, std::monostate>) {
-                    return Physics::BodyID::Null();
+                    return std::nullopt;
                 } else if constexpr (std::is_same_v<C, OwnedMesh>) {
-                    if (!collider.geometry) return Physics::BodyID::Null();
-                    return pc.CreateRigidBody(
-                        Physics::TriangleMesh {collider.geometry->vertices, collider.geometry->indices},
-                        prep.translation.Cast<double>(), prep.rotation.AsVec4(), motion, layer, 0,
-                        params.physicsCategory, params.physicsMask, activation, prep.scale
-                    );
+                    if (!collider.geometry) return std::nullopt;
+                    return Physics::ShapeVariant {
+                        Physics::TriangleMesh {collider.geometry->vertices, collider.geometry->indices}};
                 } else if constexpr (std::is_same_v<C, OwnedCompound>) {
-                    return pc.CreateRigidBody(
-                        collider.View(), prep.translation.Cast<double>(), prep.rotation.AsVec4(), motion, layer, 0,
-                        params.physicsCategory, params.physicsMask, activation, prep.scale
-                    );
+                    return Physics::ShapeVariant {collider.View()};
                 } else {
-                    return pc.CreateRigidBody(
-                        collider, prep.translation.Cast<double>(), prep.rotation.AsVec4(), motion, layer, 0,
-                        params.physicsCategory, params.physicsMask, activation, prep.scale
-                    );
+                    return Physics::ShapeVariant {collider};
                 }
             },
             *prep.shape
         );
+        if (colliderShape.has_value()) {
+            body = std::visit(
+                [&]<typename S>(const S& shape) -> Physics::BodyID {
+                    const Physics::CollisionFilter filter {.category = params.physicsCategory, .mask = params.physicsMask};
+                    const Physics::StaticBody       staticRole {
+                        .position = prep.translation.Cast<double>(), .rotation = prep.rotation, .scale = prep.scale};
+                    const Physics::KinematicBody     kinematicRole {
+                        .position = prep.translation.Cast<double>(), .rotation = prep.rotation, .scale = prep.scale};
+                    const Physics::DynamicBody       dynamicRole {
+                        .position   = prep.translation.Cast<double>(),
+                        .rotation   = prep.rotation,
+                        .scale      = prep.scale,
+                        .startAsleep = params.startAsleep};
+                    if constexpr (Physics::StaticShape<S>) {
+                        if (params.isStaticPhysics && !params.isKinematicPhysics) {
+                            return Physics::BodyID(pc.CreateBody(shape, staticRole, filter));
+                        }
+                    }
+                    if constexpr (Physics::DynamicShape<S>) {
+                        if (params.isStaticPhysics && params.isKinematicPhysics) {
+                            return Physics::BodyID(pc.CreateBody(shape, kinematicRole, filter));
+                        }
+                        if (!params.isStaticPhysics) {
+                            return Physics::BodyID(pc.CreateBody(shape, dynamicRole, filter));
+                        }
+                    }
+                    return Physics::BodyID::Null();
+                },
+                *colliderShape
+            );
+        }
     }
     if (body != Physics::BodyID::Null()) {
         reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = prep.rotation, .scale = prep.scale});
@@ -355,13 +375,24 @@ auto CreateBoxInternal(
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        const Physics::Box shape {FVec3 {halfExtents.x * params.scale.x, halfExtents.y * params.scale.y, halfExtents.z * params.scale.z}};
-        auto               body = pc->CreateRigidBody(
-            shape, params.position, params.rotation.AsVec4(),
-            params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
-            (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory,
-            params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate
-        );
+        const Physics::Box          shape {FVec3 {halfExtents.x * params.scale.x, halfExtents.y * params.scale.y, halfExtents.z * params.scale.z}};
+        const Physics::CollisionFilter filter {.category = params.physicsCategory, .mask = params.physicsMask};
+        Physics::BodyID             body = Physics::BodyID::Null();
+        if (params.isStaticPhysics && !params.isKinematicPhysics) {
+            body = Physics::BodyID(pc->CreateBody(shape, Physics::StaticBody {
+                                                              .position = params.position, .rotation = params.rotation},
+                                                  filter));
+        } else if (params.isStaticPhysics) {
+            body = Physics::BodyID(pc->CreateBody(shape, Physics::KinematicBody {
+                                                                .position = params.position, .rotation = params.rotation},
+                                                  filter));
+        } else {
+            body = Physics::BodyID(pc->CreateBody(shape, Physics::DynamicBody {
+                                                              .position    = params.position,
+                                                              .rotation    = params.rotation,
+                                                              .startAsleep = params.startAsleep},
+                                                  filter));
+        }
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = params.isStaticPhysics});
     }
 
@@ -421,12 +452,23 @@ auto SpawnPrimitive(
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        auto body = pc->CreateRigidBody(
-            physicsShape, params.position, params.rotation.AsVec4(),
-            params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
-            (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory,
-            params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate
-        );
+        const Physics::CollisionFilter filter {.category = params.physicsCategory, .mask = params.physicsMask};
+        Physics::BodyID               body = Physics::BodyID::Null();
+        if (params.isStaticPhysics && !params.isKinematicPhysics) {
+            body = Physics::BodyID(pc->CreateBody(physicsShape, Physics::StaticBody {
+                                                                     .position = params.position, .rotation = params.rotation},
+                                                  filter));
+        } else if (params.isStaticPhysics) {
+            body = Physics::BodyID(pc->CreateBody(physicsShape, Physics::KinematicBody {
+                                                                       .position = params.position, .rotation = params.rotation},
+                                                  filter));
+        } else {
+            body = Physics::BodyID(pc->CreateBody(physicsShape, Physics::DynamicBody {
+                                                                     .position    = params.position,
+                                                                     .rotation    = params.rotation,
+                                                                     .startAsleep = params.startAsleep},
+                                                  filter));
+        }
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = params.isStaticPhysics});
     }
     return e;
@@ -557,10 +599,10 @@ auto CreatePlaneInternal(
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        const Physics::Plane shape {};
-        auto                 body = pc->CreateRigidBody(
-            shape, params.position, params.rotation.AsVec4(), Physics::MotionType::Static, Physics::ObjectLayer::NonMoving, 0, params.physicsCategory,
-            params.physicsMask
+        const Physics::Plane            shape {};
+        const Physics::CollisionFilter  filter {.category = params.physicsCategory, .mask = params.physicsMask};
+        const Physics::BodyID body = Physics::BodyID(
+            pc->CreateBody(shape, Physics::StaticBody {.position = params.position, .rotation = params.rotation}, filter)
         );
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = true});
     }

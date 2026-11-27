@@ -193,7 +193,10 @@ void PushProps(COM::IEntities& entities, COM::ISimulation& physics, float dt) {
         const auto position = physics.BodyPosition(body->physicsID);
         if (!position.HasValue())
             continue;
-        const auto velocity = physics.CharacterVelocity(body->physicsID);
+        const auto character = physics.AsCharacter(body->physicsID);
+        if (!character)
+            continue;
+        const auto velocity = physics.CharacterVelocity(*character);
         if (velocity.LengthSquared() < 0.01f)
             continue;
         const auto overlaps = physics.BodiesInSphere(position.value, NonNegative(policy->pushRadius));
@@ -213,7 +216,9 @@ void PushProps(COM::IEntities& entities, COM::ISimulation& physics, float dt) {
                 continue;
             auto impulse = -normal * (-approach * NonNegative(policy->pushStrength) * stepScale);
             impulse.y    = std::max(impulse.y, 0.0f);
-            physics.AddImpulse(other, impulse);
+            if (const auto dynamic = physics.AsDynamic(other)) {
+                physics.AddImpulse(*dynamic, impulse);
+            }
         }
     }
 }

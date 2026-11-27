@@ -23,11 +23,28 @@ auto CharacterEngine() {
         )
     );
 }
-auto Body(COM::IEngine& engine, FVec3 halfSize, DVec3 position, Physics::MotionType motion = Physics::MotionType::Static) -> Physics::BodyID {
-    const auto body = engine.Simulation()->CreateBoxBody(halfSize, {.position = position, .motionType = motion});
+auto Body(COM::IEngine& engine, FVec3 halfSize, DVec3 position, bool isStatic = true, bool isKinematic = false) -> Physics::BodyID {
+    if (isStatic && !isKinematic) {
+        const auto body = engine.Simulation()->CreateStaticBodyRaw(
+            COM::InChain(Physics::Box {halfSize}, Physics::StaticBody {.position = position}));
+        if (!ExpectTrue(body.HasValue()))
+            return Physics::BodyID::Null();
+        engine.Entities()->Spawn(Components::PhysicsComponent {.physicsID = body.value, .isStatic = true});
+        return body.value;
+    }
+    if (isKinematic) {
+        const auto body = engine.Simulation()->CreateKinematicBodyRaw(
+            COM::InChain(Physics::Box {halfSize}, Physics::KinematicBody {.position = position}));
+        if (!ExpectTrue(body.HasValue()))
+            return Physics::BodyID::Null();
+        engine.Entities()->Spawn(Components::PhysicsComponent {.physicsID = body.value, .isStatic = false});
+        return body.value;
+    }
+    const auto body = engine.Simulation()->CreateDynamicBodyRaw(
+        COM::InChain(Physics::Box {halfSize}, Physics::DynamicBody {.position = position}));
     if (!ExpectTrue(body.HasValue()))
         return Physics::BodyID::Null();
-    engine.Entities()->Spawn(Components::PhysicsComponent {.physicsID = body.value, .isStatic = motion == Physics::MotionType::Static});
+    engine.Entities()->Spawn(Components::PhysicsComponent {.physicsID = body.value, .isStatic = false});
     return body.value;
 }
 struct CharacterHostSuite {
@@ -175,7 +192,7 @@ struct CharacterHostSuite {
             const auto at = engine->Simulation()->BodyPosition(body);
             if (!ExpectTrue(at.HasValue()))
                 return {};
-            const auto prop = Body(*engine.Get(), {.1f, .1f, .1f}, at.value + DVec3 {.65, 0, 0}, Physics::MotionType::Dynamic);
+            const auto prop = Body(*engine.Get(), {.1f, .1f, .1f}, at.value + DVec3 {.65, 0, 0}, false);
             advance();
             const auto before = engine->Simulation()->BodyLinearVelocity(prop);
             ExpectTrue(before.HasValue());

@@ -32,8 +32,8 @@ struct SpawnParams {
     bool     useBoxColliders = false;
     bool     isStaticPhysics = true;
     // Static bodies that are scripted per-frame by gameplay systems (doors,
-    // buttons): created as Jolt kinematic bodies in the MOVING layer so their
-    // pose can be teleported via SetKinematicPose. isStaticPhysics must stay
+    // buttons): created as Jolt kinematic bodies so their pose can be
+    // teleported via SetPose(KinematicBodyID, ...). isStaticPhysics must stay
     // true so VisualInterpolationSystem leaves their TransformComponent alone.
     bool isKinematicPhysics = false;
     // Dynamic bodies are added to the physics system asleep (Jolt

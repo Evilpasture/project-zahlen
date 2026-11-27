@@ -1488,7 +1488,10 @@ auto main(int argc, char* argv[]) -> int {
         const FVec3 spawnFeet {sceneDesc.camera.position};
         const FVec3 spawnCenter = spawnFeet + FVec3(0.0f, 0.05f, 0.0f);
 
-        const auto bodyRes = engine->Simulation()->CreateCharacter(ZHLN::COM::InChain(ZHLN::Physics::CharacterCreateDesc {.position = spawnCenter.Cast<double>(), .maxSlopeRadians = (std::numbers::pi_v<float> / 180.0f) * 50.0f}, playerHull));
+        const auto bodyRes = engine->Simulation()->CreateCharacterRaw(ZHLN::COM::InChain(playerHull, ZHLN::Physics::CharacterBody {
+                                                                                                    .position      = spawnCenter.Cast<double>(),
+                                                                                                    .maxSlopeAngle = ZHLN::RadF {(std::numbers::pi_v<float> / 180.0f) * 50.0f},
+                                                                                                }));
         if (!bodyRes.HasValue() || bodyRes.value == ZHLN::Physics::BodyID::Null()) {
             ZHLN::Log<ZHLN::LogSeverity::Error>("Failed to create the player CharacterVirtual body.");
             return EXIT_FAILURE;

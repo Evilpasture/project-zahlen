@@ -111,10 +111,10 @@ auto LogicBenchmark::SpawnFloor() -> void {
     }
 
     auto*                  physics = m_world->Simulation();
-    Physics::Box           slab {.halfExtents = {kFloorHalfExtent, kFloorHalfHeight, kFloorHalfExtent}};
-    Physics::RigidBodyPose pose {.position = {0.0, -static_cast<double>(kFloorHalfHeight), 0.0}, .motionType = Physics::MotionType::Static};
-    auto                   chain = COM::InChain(slab, pose);
-    auto                   body  = physics->CreateRigidBody(chain.Head());
+    Physics::Box          slab {.halfExtents = {kFloorHalfExtent, kFloorHalfHeight, kFloorHalfExtent}};
+    Physics::StaticBody   role {.position = {0.0, -static_cast<double>(kFloorHalfHeight), 0.0}};
+    auto                  chain = COM::InChain(slab, role);
+    auto                  body  = physics->CreateStaticBodyRaw(chain.Head());
     if (!body.HasValue() || body.value == Physics::BodyID::Null())
         return;
     auto*        entities = m_world->Entities();
@@ -141,10 +141,10 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
             break;
         }
 
-        const FVec3 position = LatticePosition(m_spawnedCubes);
-        Physics::RigidBodyPose pose {.position = position.Cast<double>(), .motionType = Physics::MotionType::Dynamic};
-        auto                   chain = COM::InChain(cube, pose);
-        auto                   body  = physics->CreateRigidBody(chain.Head());
+        const FVec3    position = LatticePosition(m_spawnedCubes);
+        Physics::DynamicBody role {.position = position.Cast<double>()};
+        auto                  chain = COM::InChain(cube, role);
+        auto                  body  = physics->CreateDynamicBodyRaw(chain.Head());
         if (!body.HasValue() || body.value == Physics::BodyID::Null())
             break;
         const Entity entity = registry->CreateEntity();

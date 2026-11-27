@@ -19,14 +19,11 @@
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <cstddef>
 #include <cmath>
+#include <concepts>
 #include <cstdint>
 #include <type_traits>
 
 namespace ZHLN::Physics {
-
-enum class MotionType : uint8_t { Static, Kinematic, Dynamic };
-enum class ObjectLayer : uint8_t { NonMoving, Moving };
-enum class Activation : uint8_t { Activate, DontActivate };
 
 struct DebugVertex {
     float    x, y, z;
@@ -57,43 +54,90 @@ struct RaycastResult {
     bool        hasHit;
 };
 
-// --- Chainable fixed-layout rigid-body descriptors ----------------------------
-// Shape vocabulary (Box, Sphere, ... Compound) lives in PhysicsShapes.hpp.
+// --- Body roles ----------------------------------------------------------------
+// The role IS the creation payload: pose plus motion policy in one wire node.
+// Layer, activation and sleep policy are derived from the role (see
+// PhysicsContext), so they can no longer contradict it.
 
-struct RigidBodyPose {
+struct StaticBody {
     ZHLN::DVec3 position {};
-    ZHLN::Quat  rotation   = ZHLN::Quat::Identity();
+    ZHLN::Quat  rotation = ZHLN::Quat::Identity();
     ZHLN::FVec3 scale {1.0f, 1.0f, 1.0f};
-    MotionType  motionType = MotionType::Dynamic;
-    Activation  activation = Activation::Activate;
 };
 
-struct RigidBodySurface {
-    uint32_t materialID       = 0;
-    float    friction         = 0.2f;
-    float    restitution      = 0.0f;
-    bool     registerMaterial = false;
-};
-
-struct RigidBodyFilter {
-    ObjectLayer layer            = ObjectLayer::Moving;
-    bool        hasExplicitLayer = false;
-    uint32_t    category         = 0xFFFFFFFFu;
-    uint32_t    mask             = 0xFFFFFFFFu;
-};
-
-
-struct CharacterCreateDesc {
+struct KinematicBody {
     ZHLN::DVec3 position {};
-    float       capsuleHalfHeight        = 0.5f;
-    float       capsuleRadius            = 0.3f;
-    bool        useCustomCapsule         = false;
-    float       maxSlopeRadians          = 0.785398163f;
-    float       maxStrength              = 100.0f;
-    float       characterPadding         = 0.02f;
-    float       penetrationRecoverySpeed = 1.0f;
-    uint32_t    category                 = 0xFFFFFFFFu;
-    uint32_t    mask                     = 0xFFFFFFFFu;
+    ZHLN::Quat  rotation = ZHLN::Quat::Identity();
+    ZHLN::FVec3 scale {1.0f, 1.0f, 1.0f};
+};
+
+struct DynamicBody {
+    ZHLN::DVec3 position {};
+    ZHLN::Quat  rotation = ZHLN::Quat::Identity();
+    ZHLN::FVec3 scale {1.0f, 1.0f, 1.0f};
+    ZHLN::FVec3 velocity {};
+    // Spawn asleep (Jolt DontActivate); an active body or an impulse/velocity
+    // change wakes it.
+    bool startAsleep = false;
+};
+
+struct CharacterBody {
+    ZHLN::DVec3 position {};
+    // 45 degrees.
+    RadF  maxSlopeAngle {0.785398163f};
+    float maxStrength              = 100.0f;
+    float padding                  = 0.02f;
+    float penetrationRecoverySpeed = 1.0f;
+};
+
+// --- Body creation modifiers ---------------------------------------------------
+// Any subset may travel a creation chain alongside exactly one role node.
+
+struct SurfaceMaterial {
+    float friction    = 0.2f;
+    float restitution = 0.0f;
+};
+
+struct CollisionFilter {
+    uint32_t category = 0xFFFFFFFF;
+    uint32_t mask     = 0xFFFFFFFF;
+};
+
+// Marker: park this static body in Jolt's MOVING broadphase (scripted statics
+// that must be found by moving-layer queries). Kinematic and dynamic bodies
+// are already there, so the marker changes nothing for them.
+struct MovingBroadphase {};
+
+// Registered materials are identified by a wire-safe handle; Default (0) is
+// Jolt friction 0.2 / restitution 0.0.
+enum class PhysicsMaterialID : uint32_t { Default = 0 };
+
+template <typename T>
+concept BodyModifier = std::same_as<T, SurfaceMaterial> || std::same_as<T, CollisionFilter> ||
+                       std::same_as<T, MovingBroadphase>;
+
+// --- Jolt-free query results ----------------------------------------------------
+// ZHLN value types only: ISimulation can return these across the boundary.
+
+struct RaycastPenetrationResult {
+    BodyID            bodyID;
+    ZHLN::DVec3       entryPosition;
+    ZHLN::DVec3       exitPosition;
+    ZHLN::FVec3       entryNormal;
+    ZHLN::FVec3       exitNormal;
+    float             entryFraction;
+    float             exitFraction;
+    float             thickness;
+    PhysicsMaterialID materialID;
+    bool              hasHit;
+};
+
+struct ShapeCastResult {
+    BodyID      bodyID;
+    ZHLN::DVec3 contactPoint;
+    ZHLN::FVec3 contactNormal;
+    float       fraction;
+    bool        hasHit;
 };
 
 // --- Constraint wire structs ---------------------------------------------------
@@ -144,6 +188,15 @@ struct ConeConstraint {
     RadF halfAngle {0.0f};
 };
 
+static_assert(std::is_standard_layout_v<StaticBody> && std::is_trivially_copyable_v<StaticBody>);
+static_assert(std::is_standard_layout_v<KinematicBody> && std::is_trivially_copyable_v<KinematicBody>);
+static_assert(std::is_standard_layout_v<DynamicBody> && std::is_trivially_copyable_v<DynamicBody>);
+static_assert(std::is_standard_layout_v<CharacterBody> && std::is_trivially_copyable_v<CharacterBody>);
+static_assert(std::is_standard_layout_v<SurfaceMaterial> && std::is_trivially_copyable_v<SurfaceMaterial>);
+static_assert(std::is_standard_layout_v<CollisionFilter> && std::is_trivially_copyable_v<CollisionFilter>);
+static_assert(std::is_standard_layout_v<MovingBroadphase> && std::is_trivially_copyable_v<MovingBroadphase>);
+static_assert(std::is_standard_layout_v<RaycastPenetrationResult> && std::is_trivially_copyable_v<RaycastPenetrationResult>);
+static_assert(std::is_standard_layout_v<ShapeCastResult> && std::is_trivially_copyable_v<ShapeCastResult>);
 static_assert(std::is_standard_layout_v<MotorSettings> && std::is_trivially_copyable_v<MotorSettings>);
 static_assert(std::is_standard_layout_v<FixedConstraint> && std::is_trivially_copyable_v<FixedConstraint>);
 static_assert(std::is_standard_layout_v<PointConstraint> && std::is_trivially_copyable_v<PointConstraint>);
@@ -152,9 +205,5 @@ static_assert(std::is_standard_layout_v<HingeConstraint> && std::is_trivially_co
 static_assert(std::is_standard_layout_v<SliderConstraint> && std::is_trivially_copyable_v<SliderConstraint>);
 static_assert(std::is_standard_layout_v<ConeConstraint> && std::is_trivially_copyable_v<ConeConstraint>);
 
-static_assert(std::is_standard_layout_v<RigidBodyPose> && std::is_trivially_copyable_v<RigidBodyPose>);
-static_assert(std::is_standard_layout_v<RigidBodySurface> && std::is_trivially_copyable_v<RigidBodySurface>);
-static_assert(std::is_standard_layout_v<RigidBodyFilter> && std::is_trivially_copyable_v<RigidBodyFilter>);
-static_assert(std::is_standard_layout_v<CharacterCreateDesc> && std::is_trivially_copyable_v<CharacterCreateDesc>);
 
 } // namespace ZHLN::Physics

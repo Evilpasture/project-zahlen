@@ -6,10 +6,13 @@
 // Zahlen/COM/ISimulation.hpp
 //
 // Physics as the public API sees it. Creation descriptors travel via reflected
-// ChainInNode lists (Physics::Box, Sphere, Capsule, Cylinder, Plane,
-// TriangleMesh, MeshAsset, HeightField, Compound + optional RigidBodyPose,
-// RigidBodySurface, RigidBodyFilter) so new body properties or shape families
-// never shift the vtable or read past caller-owned structs.
+// ChainInNode lists (exactly one Physics shape node + exactly one role node
+// (StaticBody, KinematicBody, DynamicBody or CharacterBody) + any subset of
+// SurfaceMaterial, CollisionFilter and MovingBroadphase) so new body
+// properties or shape families never shift the vtable or read past
+// caller-owned structs. The four *Raw creation methods are the tier below
+// ergonomics; mutations are role-scoped and narrow through AsDynamic /
+// AsKinematic / AsCharacter.
 
 #include <Zahlen/COM/Types.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
@@ -54,18 +57,31 @@ struct ISimulation : IObject {
     [[nodiscard]] virtual Option<Physics::BodyStateSnapshot> BodyState(Physics::BodyID body) const noexcept = 0;
     [[nodiscard]] virtual Option<FVec3>                      BodyLinearVelocity(Physics::BodyID body) const noexcept = 0;
 
-    [[nodiscard]] virtual FVec3 CharacterVelocity(Physics::BodyID body) const noexcept = 0;
-    [[nodiscard]] virtual float CharacterGroundOffset(Physics::BodyID body) const noexcept = 0;
-    [[nodiscard]] virtual bool  IsCharacterOnGround(Physics::BodyID body) const noexcept = 0;
+    [[nodiscard]] virtual FVec3 CharacterVelocity(Physics::CharacterID body) const noexcept = 0;
+    [[nodiscard]] virtual float CharacterGroundOffset(Physics::CharacterID body) const noexcept = 0;
+    [[nodiscard]] virtual bool  IsCharacterOnGround(Physics::CharacterID body) const noexcept = 0;
     [[nodiscard]] virtual bool  IsBodyDynamic(Physics::BodyID body) const noexcept = 0;
 
-    virtual void AddImpulse(Physics::BodyID body, FVec3 impulse) noexcept = 0;
-    virtual void SetBodyLinearVelocity(Physics::BodyID body, FVec3 velocity) noexcept = 0;
-    virtual void SetKinematicPose(Physics::BodyID body, DVec3 position, Quat rotation) noexcept = 0;
-    virtual void SetCollisionFilter(Physics::BodyID body, uint32_t category, uint32_t mask) noexcept = 0;
-    virtual void RegisterPhysicsMaterial(uint32_t materialID, float friction, float restitution) noexcept = 0;
-    virtual void SetCharacterVelocity(Physics::BodyID body, FVec3 velocity) noexcept = 0;
-    virtual void SetCharacterPosition(Physics::BodyID body, DVec3 position) noexcept = 0;
+    // Role narrowing: BodyID -> typed ID while the slot is alive with that
+    // role's motion type. Callers that only hold a generic PhysicsComponent
+    // id pay this one check, then get compile-checked mutations.
+    [[nodiscard]] virtual Option<Physics::DynamicBodyID>  AsDynamic(Physics::BodyID body) const noexcept = 0;
+    [[nodiscard]] virtual Option<Physics::KinematicBodyID> AsKinematic(Physics::BodyID body) const noexcept = 0;
+    [[nodiscard]] virtual Option<Physics::CharacterID>    AsCharacter(Physics::BodyID body) const noexcept = 0;
+
+    // Role-scoped mutations: the typed ID is the proof of role, so a
+    // character velocity can never be written to a box.
+    virtual void AddImpulse(Physics::DynamicBodyID body, FVec3 impulse) noexcept = 0;
+    virtual void SetVelocity(Physics::DynamicBodyID body, FVec3 velocity) noexcept = 0;
+    virtual void SetVelocity(Physics::CharacterID body, FVec3 velocity) noexcept = 0;
+    virtual void SetPose(Physics::KinematicBodyID body, DVec3 position, Quat rotation) noexcept = 0;
+    virtual void SetPose(Physics::CharacterID body, DVec3 position) noexcept = 0;
+
+    // Role-agnostic: any live rigid slot.
+    virtual void SetCollisionFilter(Physics::BodyID body, Physics::CollisionFilter filter) noexcept = 0;
+    // Fingerprinted material registration; identical (friction, restitution)
+    // reuses one PhysicsMaterialID (Default = 0 is Jolt 0.2/0.0).
+    virtual Physics::PhysicsMaterialID RegisterMaterial(Physics::SurfaceMaterial material) noexcept = 0;
     virtual void DestroyBody(Physics::BodyID body) noexcept = 0;
     virtual void DestroyBodies(Span<const Physics::BodyID> bodies) noexcept = 0;
     virtual void DestroyRagdolls(Span<const Physics::RagdollID> ragdolls) noexcept = 0;
@@ -78,15 +94,16 @@ struct ISimulation : IObject {
     // physics yourself.
     virtual void Step(float deltaTime) noexcept = 0;
 
-    // Requires exactly one shape node (Physics::Box, Sphere, Capsule,
-    // Cylinder, Plane, TriangleMesh, MeshAsset, HeightField or Compound)
-    // plus any subset of RigidBodyPose, RigidBodySurface and
-    // RigidBodyFilter.
-    virtual Result<Physics::BodyID> CreateRigidBody(const ChainInNode* descChain) noexcept = 0;
-
-    // Accepts Physics::CharacterCreateDesc in `descChain` (nullptr uses defaults
-    // at the origin).
-    virtual Result<Physics::BodyID> CreateCharacter(const ChainInNode* descChain) noexcept = 0;
+    // Creation tier: the chain must carry exactly one shape node (the shapes
+    // the role accepts), at most one role node (defaults when absent) and any
+    // subset of SurfaceMaterial / CollisionFilter / MovingBroadphase. Each
+    // method enforces the shape family its role allows: statics accept the
+    // full set, kinematic/dynamic accept convex + compound (meshes cannot be
+    // dynamic), characters accept Capsule and DualShape.
+    [[nodiscard]] virtual Result<Physics::StaticBodyID> CreateStaticBodyRaw(const ChainInNode* shapeChain) noexcept = 0;
+    [[nodiscard]] virtual Result<Physics::KinematicBodyID> CreateKinematicBodyRaw(const ChainInNode* shapeChain) noexcept = 0;
+    [[nodiscard]] virtual Result<Physics::DynamicBodyID> CreateDynamicBodyRaw(const ChainInNode* shapeChain) noexcept = 0;
+    [[nodiscard]] virtual Result<Physics::CharacterID> CreateCharacterRaw(const ChainInNode* shapeChain) noexcept = 0;
 
     // Borrowed vertex spans owned by the engine's debug buffers. They stay
     // valid until the next call or the next step, and are never freed by the
@@ -95,20 +112,22 @@ struct ISimulation : IObject {
 
     // --- Ergonomics: compiled in the consumer's TU, never in the library ---
 
+    // Default capsule hull (0.5 half-height, 0.3 radius), role defaults.
     [[nodiscard]] auto CreateCharacter(DVec3 position) noexcept -> Physics::BodyID {
-        const Result<Physics::BodyID> created =
-            CreateCharacter(InChain(Physics::CharacterCreateDesc {.position = position}));
-        return created.HasValue() ? created.value : Physics::BodyID::Null();
+        const Result<Physics::CharacterID> created =
+            CreateCharacterRaw(InChain(Physics::Capsule {.halfHeight = 0.5f, .radius = 0.3f},
+                                       Physics::CharacterBody {.position = position}));
+        return created.HasValue() ? Physics::BodyID(created.value) : Physics::BodyID::Null();
     }
 
-    auto CreateBoxBody(FVec3 halfExtents, const Physics::RigidBodyPose& pose = {}) noexcept
-        -> Result<Physics::BodyID> {
-        return CreateRigidBody(InChain(Physics::Box {.halfExtents = halfExtents}, pose));
+    auto CreateBoxBody(FVec3 halfExtents, const Physics::DynamicBody& role = {}) noexcept
+        -> Result<Physics::DynamicBodyID> {
+        return CreateDynamicBodyRaw(InChain(Physics::Box {.halfExtents = halfExtents}, role));
     }
 
-    auto CreateSphereBody(float radius, const Physics::RigidBodyPose& pose = {}) noexcept
-        -> Result<Physics::BodyID> {
-        return CreateRigidBody(InChain(Physics::Sphere {.radius = radius}, pose));
+    auto CreateSphereBody(float radius, const Physics::DynamicBody& role = {}) noexcept
+        -> Result<Physics::DynamicBodyID> {
+        return CreateDynamicBodyRaw(InChain(Physics::Sphere {.radius = radius}, role));
     }
 
     [[nodiscard]] auto Raycast(DVec3 origin, FVec3 direction) const noexcept -> Physics::RaycastResult {

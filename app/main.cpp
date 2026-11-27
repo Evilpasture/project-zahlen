@@ -142,7 +142,9 @@ struct SandboxGame {
         );
         if (cube != ZHLN::Entity::Null()) {
             if (auto body = reg.Get<ZHLN::Components::PhysicsComponent>(cube)) {
-                engine.Simulation()->AddImpulse(body->physicsID, forward * 12.0f);
+                if (const auto dynamic = engine.Simulation()->AsDynamic(body->physicsID)) {
+                    engine.Simulation()->AddImpulse(*dynamic, forward * 12.0f);
+                }
             }
         }
         if (engine.Audio()->Initialized()) {

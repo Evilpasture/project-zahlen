@@ -161,8 +161,10 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
                 if (!ragComp.isAddedToPhysics) {
                     auto initialVelocity = FVec3::Zero();
                     if (phys) {
-                        const auto velocity = pc.GetCharacterVelocity(phys->physicsID);
-                        initialVelocity = {velocity.GetX(), velocity.GetY(), velocity.GetZ()};
+                        if (const auto character = pc.AsCharacter(phys->physicsID)) {
+                            const auto velocity = pc.GetCharacterVelocity(*character);
+                            initialVelocity    = {velocity.GetX(), velocity.GetY(), velocity.GetZ()};
+                        }
                     }
                     pc.ActivateRagdoll(ragComp.ragdollID, animPose, initialVelocity);
                     ragComp.isAddedToPhysics = true;

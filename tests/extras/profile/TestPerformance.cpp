@@ -56,7 +56,9 @@ struct PerformanceTestSuite {
             auto& ents  = *world.Entities();
             auto& sim   = *world.Simulation();
 
-            (void)sim.CreateBoxBody({50.0f, 0.5f, 50.0f}, {.position = {0.0, -0.5, 0.0}, .motionType = ZHLN::Physics::MotionType::Static});
+            (void)sim.CreateStaticBodyRaw(COM::InChain(
+                ZHLN::Physics::Box {.halfExtents = {50.0f, 0.5f, 50.0f}},
+                ZHLN::Physics::StaticBody {.position = {0.0, -0.5, 0.0}}));
             std::vector<ZHLN::Entity> spawned;
             spawned.reserve(128);
             for (uint32_t i = 0; i < 128; ++i) {

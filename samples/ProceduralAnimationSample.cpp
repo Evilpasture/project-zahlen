@@ -731,7 +731,7 @@ auto main(int argc, char* argv[]) -> int {
 
     constexpr float    kWalkSpeed = 2.40f;
     constexpr float    kJumpForce = 7.00f;
-    const auto playerBody = engine->Simulation()->CreateCharacter(ZHLN::COM::InChain(ZHLN::Physics::CharacterCreateDesc {.position = {0.0, 1.20, 0.0}}, dualShapeConfig)).value;
+    const auto playerBody = engine->Simulation()->CreateCharacterRaw(ZHLN::COM::InChain(ZHLN::Physics::CharacterBody {.position = {0.0, 1.20, 0.0}}, dualShapeConfig)).value;
     const ZHLN::Entity player = engine->Entities()->Spawn(
         ZHLN::Components::TransformComponent {.position = {0.0f, 1.20f, 0.0f}},
         ZHLN::Components::PhysicsComponent {.physicsID = playerBody, .isStatic = false}

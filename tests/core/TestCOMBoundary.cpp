@@ -307,18 +307,13 @@ void CheckSimulation(ZHLN::COM::ISimulation& simulation) {
     ZHLN::Test::ExpectTrue(!miss.hasHit);
 
     // Chained rigid bodies: static floor box, dynamic sphere, and compound shape.
-    const auto floorRes = simulation.CreateRigidBody(ZHLN::COM::InChain(
+    const auto floorRes = simulation.CreateStaticBodyRaw(ZHLN::COM::InChain(
         ZHLN::Physics::Box {.halfExtents = {10.0F, 0.5F, 10.0F}},
-        ZHLN::Physics::RigidBodyPose {
-            .position   = {0.0, -0.5, 0.0},
-            .motionType = ZHLN::Physics::MotionType::Static,
-            .activation = ZHLN::Physics::Activation::DontActivate,
-        },
-        ZHLN::Physics::RigidBodySurface {
-            .materialID = 7, .friction = 0.8F, .restitution = 0.1F, .registerMaterial = true}));
+        ZHLN::Physics::StaticBody {.position = {0.0, -0.5, 0.0}},
+        ZHLN::Physics::SurfaceMaterial {.friction = 0.8F, .restitution = 0.1F}));
     ZHLN::Test::ExpectTrue(floorRes.HasValue());
 
-    const auto sphereRes = simulation.CreateSphereBody(0.5F, ZHLN::Physics::RigidBodyPose {.position = {0.0, 4.0, 0.0}});
+    const auto sphereRes = simulation.CreateSphereBody(0.5F, ZHLN::Physics::DynamicBody {.position = {0.0, 4.0, 0.0}});
     ZHLN::Test::ExpectTrue(sphereRes.HasValue());
 
     const std::array<ZHLN::Physics::Placed<ZHLN::Physics::Box>, 1> compoundBoxes {
@@ -327,16 +322,16 @@ void CheckSimulation(ZHLN::COM::ISimulation& simulation) {
     const std::array<ZHLN::Physics::Placed<ZHLN::Physics::Sphere>, 1> compoundSpheres {
         ZHLN::Physics::Placed<ZHLN::Physics::Sphere> {0.25F, {0.5F, 0.0F, 0.0F}},
     };
-    const auto compoundRes = simulation.CreateRigidBody(ZHLN::COM::InChain(
+    const auto compoundRes = simulation.CreateDynamicBodyRaw(ZHLN::COM::InChain(
         ZHLN::Physics::Compound {
             .boxes   = compoundBoxes,
             .spheres = compoundSpheres,
         },
-        ZHLN::Physics::RigidBodyPose {.position = {3.0, 2.0, 0.0}}));
+        ZHLN::Physics::DynamicBody {.position = {3.0, 2.0, 0.0}}));
     ZHLN::Test::ExpectTrue(compoundRes.HasValue());
 
     if (floorRes.HasValue() && sphereRes.HasValue() && compoundRes.HasValue()) {
-        simulation.SetBodyLinearVelocity(sphereRes.value, {0.0F, -2.0F, 0.0F});
+        simulation.SetVelocity(sphereRes.value, FVec3 {0.0F, -2.0F, 0.0F});
         simulation.Step(1.0F / 60.0F);
         ZHLN::Test::ExpectTrue(simulation.BodyLinearVelocity(sphereRes.value).HasValue());
 
@@ -345,15 +340,14 @@ void CheckSimulation(ZHLN::COM::ISimulation& simulation) {
         ZHLN::Test::ExpectTrue(hit.hasHit);
         ZHLN::Test::ExpectTrue(hit.bodyID == sphereRes.value);
 
-        const auto charRes = simulation.CreateCharacter(ZHLN::COM::InChain(ZHLN::Physics::CharacterCreateDesc {
-            .position          = {-3.0, 2.0, 0.0},
-            .capsuleHalfHeight = 0.85F,
-            .capsuleRadius     = 0.35F,
-            .useCustomCapsule  = true,
-        }));
+        const auto charRes = simulation.CreateCharacterRaw(ZHLN::COM::InChain(
+            ZHLN::Physics::Capsule {.halfHeight = 0.85F, .radius = 0.35F},
+            ZHLN::Physics::CharacterBody {.position = {-3.0, 2.0, 0.0}}));
         ZHLN::Test::ExpectTrue(charRes.HasValue());
 
-        const std::array<ZHLN::Physics::BodyID, 3> cleanup {floorRes.value, sphereRes.value, compoundRes.value};
+        const std::array<ZHLN::Physics::BodyID, 3> cleanup {
+            ZHLN::Physics::BodyID(floorRes.value), ZHLN::Physics::BodyID(sphereRes.value),
+            ZHLN::Physics::BodyID(compoundRes.value)};
         simulation.DestroyBodies(cleanup);
         if (charRes.HasValue()) simulation.DestroyBody(charRes.value);
     }
@@ -525,7 +519,7 @@ void CheckEngineComponents(ZHLN::COM::IEntities& entities, ZHLN::COM::ISimulatio
 
     // SceneResources ownership safety: detaching PhysicsComponent over COM must
     // destroy the underlying Jolt body rather than leaking it.
-    const auto sphereBody = simulation.CreateSphereBody(0.5F, ZHLN::Physics::RigidBodyPose {.position = {0.0, 8.0, 0.0}});
+    const auto sphereBody = simulation.CreateSphereBody(0.5F, ZHLN::Physics::DynamicBody {.position = {0.0, 8.0, 0.0}});
     if (ZHLN::Test::ExpectTrue(sphereBody.HasValue())) {
         void* physSlot = entities.AttachEngineRaw(entity, "ZHLN::Components::PhysicsComponent",
                                                   sizeof(ConsumerSide::PhysicsComponent),

@@ -16,7 +16,9 @@ void PhysicsSystem::CommitImpulses(ImpulseQuery query, ECS::EntityCommandBuffer&
         const auto cmd = query.Get<Components::ImpulseCommand>(e);
         const auto phys = query.Get<Components::PhysicsComponent>(e);
         if (cmd && phys && cmd->linear.LengthSquared() > 0.0f) {
-            physics->AddImpulse(phys->physicsID, cmd->linear);
+            if (const auto dynamic = physics->AsDynamic(phys->physicsID)) {
+                physics->AddImpulse(*dynamic, cmd->linear);
+            }
         }
         commands.RemoveComponent<Components::ImpulseCommand>(e);
     }

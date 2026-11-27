@@ -72,27 +72,6 @@ struct RagdollPartParams {
     float maxMotorForce = 100.0f;
 };
 
-struct RaycastPenetrationResult {
-    BodyID     bodyID;
-    JPH::RVec3 entryPosition;
-    JPH::RVec3 exitPosition;
-    JPH::Vec3  entryNormal;
-    JPH::Vec3  exitNormal;
-    float      entryFraction;
-    float      exitFraction;
-    float      thickness;
-    uint32_t   materialID;
-    bool       hasHit;
-};
-
-struct ShapeCastResult {
-    BodyID     bodyID;
-    JPH::RVec3 contactPoint;
-    JPH::Vec3  contactNormal;
-    float      fraction;
-    bool       hasHit;
-};
-
 struct CullResult {
     Physics::BodyID* results;
     uint32_t      count;
@@ -100,15 +79,13 @@ struct CullResult {
 
 static_assert(
     (std::is_trivially_default_constructible_v<RaycastResult> && std::is_trivially_copyable_v<RaycastResult>) &&
-    (std::is_trivially_default_constructible_v<RaycastPenetrationResult> && std::is_trivially_copyable_v<RaycastPenetrationResult>) &&
-    (std::is_trivially_default_constructible_v<ShapeCastResult> && std::is_trivially_copyable_v<ShapeCastResult>) &&
     (std::is_trivially_default_constructible_v<CullResult> && std::is_trivially_copyable_v<CullResult>)
 );
 
 // Runtime-held body shape for chain dispatch and prefab colliders. Not a
 // wire type and never an argument to creation: a caller that only knows the
 // shape at runtime holds one of these, then re-dispatches through the typed
-// CreateRigidBody<S> so each creation call still names its shape statically.
+// CreateBody<S> so each creation call still names its shape statically.
 using ShapeVariant = std::variant<Box, Sphere, Capsule, Cylinder, Plane, TriangleMesh, MeshAsset, HeightField, Compound>;
 
 // Runtime-held constraint parameters for the mailbox; creation goes through
@@ -116,27 +93,23 @@ using ShapeVariant = std::variant<Box, Sphere, Capsule, Cylinder, Plane, Triangl
 using ConstraintVariant =
     std::variant<FixedConstraint, PointConstraint, DistanceConstraint, HingeConstraint, SliderConstraint, ConeConstraint>;
 
+// Resolved body-creation modifiers (a chain's SurfaceMaterial / CollisionFilter
+// / MovingBroadphase nodes, or defaults). Not a wire type: chain dispatchers
+// fill one and hand it to CreateBody.
+struct BodyModifiers {
+    SurfaceMaterial surface {};
+    CollisionFilter filter {};
+    bool            hasSurface       = false;
+    bool            movingBroadphase = false;
+};
+
 auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC;
 auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize) -> JPH::ShapeRefC;
 auto GetBodyID(const PhysicsWorld& world, Physics::BodyID handle) -> JPH::BodyID;
 
 auto CreateDualShape(const DualShape& shape = {}) -> JPH::ShapeRefC;
 
-// Character creation owns Jolt shape/plane objects, so it belongs with the
-// physics implementation rather than in the Jolt-free query value types.
-struct CharacterParams {
-    JPH::ShapeRefC shape = nullptr;
-
-    float          maxSlopeAngle            = JPH::DegreesToRadians(45.0f);
-    float          maxStrength              = 100.0f;
-    float          characterPadding         = 0.02f;
-    float          penetrationRecoverySpeed = 1.0f;
-    JPH::Plane     supportingVolume         = JPH::Plane(JPH::Vec3::sAxisY(), -0.4f);
-    uint32_t       category                 = 0xFFFFFFFF;
-    uint32_t       mask                     = 0xFFFFFFFF;
-};
-
-}
+} // namespace Physics
 
 class PhysicsContext {
   public:
@@ -166,24 +139,56 @@ class PhysicsContext {
     // resolver context alive until this PhysicsContext is destroyed or unbound.
     void BindCollisionAssetResolver(Physics::CollisionAssetResolver resolver, void* context) noexcept;
 
-    // Typed creation: the shape travels as its value struct, so a wrong
-    // shape/wrong-argument pairing cannot compile. Runtime-held shapes (a
-    // chain node, a prefab collider) live in ShapeVariant and re-dispatch
-    // through this template; no runtime type enum crosses the API.
-    template <typename S>
-    [[nodiscard]] auto CreateRigidBody(
-        const S& shape, DVec3 pos, FVec4 rot, Physics::MotionType motion, Physics::ObjectLayer layer,
-        uint32_t materialID = 0, uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF,
-        Physics::Activation activation = Physics::Activation::Activate, FVec3 scale = {1, 1, 1}
-    ) -> Physics::BodyID {
-        return CreateRigidBodyFromVariant(
-            ShapeVariant {shape}, pos, rot, motion, layer, materialID, category, mask, activation, scale
-        );
+    // --- Typed body creation -------------------------------------------------
+    // One overload per role: the role node carries pose + motion policy, the
+    // shape carries geometry, BodyModifiers carry material/filter/broadphase
+    // details. Layer, activation and sleep policy are derived from the role,
+    // so they cannot contradict it at the call site.
+    template <Physics::StaticShape S, Physics::BodyModifier... Mods>
+    [[nodiscard]] auto CreateBody(const S& shape, const Physics::StaticBody& role, const Mods&... mods) -> Physics::StaticBodyID {
+        return CreateBodyImpl(ShapeVariant {shape}, role, ResolveModifiers(mods...));
+    }
+    template <Physics::DynamicShape S, Physics::BodyModifier... Mods>
+    [[nodiscard]] auto CreateBody(const S& shape, const Physics::KinematicBody& role, const Mods&... mods)
+        -> Physics::KinematicBodyID {
+        return CreateBodyImpl(ShapeVariant {shape}, role, ResolveModifiers(mods...));
+    }
+    template <Physics::DynamicShape S, Physics::BodyModifier... Mods>
+    [[nodiscard]] auto CreateBody(const S& shape, const Physics::DynamicBody& role, const Mods&... mods) -> Physics::DynamicBodyID {
+        return CreateBodyImpl(ShapeVariant {shape}, role, ResolveModifiers(mods...));
+    }
+    template <Physics::CharacterShape S, Physics::BodyModifier... Mods>
+    [[nodiscard]] auto CreateBody(const S& shape, const Physics::CharacterBody& role, const Mods&... mods) -> Physics::CharacterID {
+        return CreateBodyImpl(shape, role, ResolveModifiers(mods...));
+    }
+    // Overloads for callers that already resolved modifiers (chain dispatchers).
+    template <Physics::StaticShape S>
+    [[nodiscard]] auto CreateBody(const S& shape, const Physics::StaticBody& role, const Physics::BodyModifiers& mods) -> Physics::StaticBodyID {
+        return CreateBodyImpl(ShapeVariant {shape}, role, mods);
+    }
+    template <Physics::DynamicShape S>
+    [[nodiscard]] auto CreateBody(const S& shape, const Physics::KinematicBody& role, const Physics::BodyModifiers& mods)
+        -> Physics::KinematicBodyID {
+        return CreateBodyImpl(ShapeVariant {shape}, role, mods);
+    }
+    template <Physics::DynamicShape S>
+    [[nodiscard]] auto CreateBody(const S& shape, const Physics::DynamicBody& role, const Physics::BodyModifiers& mods)
+        -> Physics::DynamicBodyID {
+        return CreateBodyImpl(ShapeVariant {shape}, role, mods);
+    }
+    template <Physics::CharacterShape S>
+    [[nodiscard]] auto CreateBody(const S& shape, const Physics::CharacterBody& role, const Physics::BodyModifiers& mods) -> Physics::CharacterID {
+        return CreateBodyImpl(shape, role, mods);
     }
 
-    auto CreateCharacter(ZHLN::DVec3 position, const Physics::CharacterParams& params = {}) -> Physics::BodyID;
-    auto CreateCustomCharacter(const Physics::CharacterCreateDesc& desc) -> Physics::BodyID;
-    [[nodiscard]] auto CharacterVelocity(Physics::BodyID handle) const -> ZHLN::FVec3;
+    // --- Role narrowing (ISimulation tier) ------------------------------------
+    // BodyID -> typed ID while the slot is alive with that role's motion type;
+    // std::nullopt otherwise (wrong role, stale generation, wrong state).
+    [[nodiscard]] auto AsDynamic(Physics::BodyID body) const noexcept -> std::optional<Physics::DynamicBodyID>;
+    [[nodiscard]] auto AsKinematic(Physics::BodyID body) const noexcept -> std::optional<Physics::KinematicBodyID>;
+    [[nodiscard]] auto AsCharacter(Physics::BodyID body) const noexcept -> std::optional<Physics::CharacterID>;
+
+    [[nodiscard]] auto CharacterVelocity(Physics::CharacterID handle) const -> ZHLN::FVec3;
 
     // Physics owns the Jolt instance; ECS components borrow a generational handle.
     auto CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, std::span<const Physics::RagdollPartParams> parts) -> Physics::RagdollID;
@@ -203,36 +208,40 @@ class PhysicsContext {
     void FillBodyStates(std::span<const Physics::BodyID> handles, std::span<Physics::BodyStateSnapshot> outStates) const noexcept;
     [[nodiscard]] bool GetRagdollPose(Physics::RagdollID handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept;
 
-    void               SetCollisionFilter(Physics::BodyID handle, uint32_t category, uint32_t mask);
+    void               SetCollisionFilter(Physics::BodyID handle, Physics::CollisionFilter filter);
     [[nodiscard]] auto GetDebugDrawData(bool drawShapes = true, bool drawConstraints = true, bool wireframe = true) const -> Physics::DebugDrawData;
-    void               RegisterMaterial(uint32_t id, float friction, float restitution);
+    // Fingerprinted: identical (friction, restitution) reuses one handle, so
+    // body creation need not re-register. PhysicsMaterialID::Default (0) is
+    // Jolt friction 0.2 / restitution 0.0.
+    [[nodiscard]] auto RegisterMaterial(Physics::SurfaceMaterial material) -> Physics::PhysicsMaterialID;
 
     void DestroyBody(Physics::BodyID handle);
     // Queue an entire scene cleanup under one shadow lock. Stale, null and
     // duplicate handles are ignored using the same validation as DestroyBody.
     void DestroyBodies(std::span<const Physics::BodyID> handles);
 
-    void SetLinearVelocity(Physics::BodyID handle, ZHLN::FVec3 velocity);
-    void SetCharacterVelocity(Physics::BodyID handle, ZHLN::FVec3 velocity);
-    void SetCharacterPosition(Physics::BodyID handle, ZHLN::DVec3 position);
-    // Teleports a kinematic (scripted) rigid body. SetCharacterPosition only
+    // Role-scoped mutations: the typed ID is the proof that the slot holds
+    // that role, so a character velocity can never be written to a box.
+    void SetVelocity(Physics::DynamicBodyID handle, ZHLN::FVec3 velocity);
+    void SetVelocity(Physics::CharacterID handle, ZHLN::FVec3 velocity);
+    void SetPose(Physics::CharacterID handle, ZHLN::DVec3 position);
+    // Teleports a kinematic (scripted) rigid body. SetPose(CharacterID) only
     // works on CharacterVirtual bodies; rigid-body handles need this instead.
-    // Ignored for static bodies, which cannot be moved in the broadphase.
-    void SetKinematicPose(Physics::BodyID handle, ZHLN::DVec3 position, ZHLN::FVec4 rotation);
+    // Static bodies cannot be moved in the broadphase and have no setter.
+    void SetPose(Physics::KinematicBodyID handle, ZHLN::DVec3 position, ZHLN::FVec4 rotation);
 
-    auto               GetCharacterVelocity(Physics::BodyID handle) const -> JPH::Vec3;
+    auto               GetCharacterVelocity(Physics::CharacterID handle) const -> JPH::Vec3;
     // Vertical half-extent of a character's collision shape, i.e. the distance
     // from the body origin (capsule centre) to the soles of its feet. Gameplay
     // needs this to place feet-referenced spawn points -- Source's
     // info_player_start and info_teleport_destination origins are at the floor.
     // Returns 0 for stale or non-character handles.
-    [[nodiscard]] auto GetCharacterGroundOffset(Physics::BodyID handle) const -> float;
-    [[nodiscard]] auto IsCharacterOnGround(Physics::BodyID handle) const -> bool;
+    [[nodiscard]] auto GetCharacterGroundOffset(Physics::CharacterID handle) const -> float;
+    [[nodiscard]] auto IsCharacterOnGround(Physics::CharacterID handle) const -> bool;
     [[nodiscard]] auto IsBodyDynamic(Physics::BodyID handle) const -> bool;
     [[nodiscard]] auto GetPositionBuffer() const -> BufferView;
     auto               GetRotation(JPH::BodyID bodyID) const -> JPH::Quat;
-    void               AddImpulse(Physics::BodyID handle, ZHLN::FVec3 impulse);
-    void               AddImpulse(Physics::BodyID handle, ZHLN::FVec3 impulse, ZHLN::DVec3 position);
+    void               AddImpulse(Physics::DynamicBodyID handle, ZHLN::FVec3 impulse);
 
     void AddRadialImpulse(ZHLN::DVec3 center, float radius, float maxImpulse);
 
@@ -295,14 +304,54 @@ class PhysicsContext {
     [[nodiscard]] auto GetInternalWorld() const noexcept -> const Physics::PhysicsWorld&;
 
   private:
-    // Jolt-facing plumbing: resolve a runtime-held shape, then create the
-    // body. The public template is the only door in.
     [[nodiscard]] auto CreateConstraintVariant(Physics::BodyID b1, Physics::BodyID b2, const Physics::ConstraintVariant& params)
         -> Physics::ConstraintID;
-    [[nodiscard]] auto CreateRigidBodyFromVariant(
-        const ShapeVariant& shape, DVec3 pos, FVec4 rot, Physics::MotionType motion, Physics::ObjectLayer layer,
-        uint32_t materialID, uint32_t category, uint32_t mask, Physics::Activation activation, FVec3 scale
-    ) -> Physics::BodyID;
+
+    [[nodiscard]] static auto ResolveModifiers() noexcept -> Physics::BodyModifiers { return {}; }
+    [[nodiscard]] static auto ResolveModifiers(const Physics::SurfaceMaterial& m) noexcept -> Physics::BodyModifiers {
+        return Physics::BodyModifiers {.surface = m, .hasSurface = true};
+    }
+    [[nodiscard]] static auto ResolveModifiers(const Physics::CollisionFilter& f) noexcept -> Physics::BodyModifiers {
+        return Physics::BodyModifiers {.filter = f};
+    }
+    [[nodiscard]] static auto ResolveModifiers(const Physics::MovingBroadphase&) noexcept -> Physics::BodyModifiers {
+        return Physics::BodyModifiers {.movingBroadphase = true};
+    }
+    template <Physics::BodyModifier First, Physics::BodyModifier... Rest>
+    [[nodiscard]] static auto ResolveModifiers(const First& first, const Rest&... rest) noexcept -> Physics::BodyModifiers {
+        Physics::BodyModifiers out = ResolveModifiers(first);
+        const auto    merge = [&out](const auto& mod) {
+            if constexpr (std::is_same_v<std::remove_cvref_t<decltype(mod)>, Physics::SurfaceMaterial>) {
+                out.surface    = mod;
+                out.hasSurface = true;
+            } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(mod)>, Physics::CollisionFilter>) {
+                out.filter = mod;
+            } else {
+                out.movingBroadphase = true;
+            }
+        };
+        (merge(rest), ...);
+        return out;
+    }
+
+    // Jolt-facing plumbing behind the public CreateBody overloads.
+    [[nodiscard]] auto ResolveShape(const Physics::ShapeVariant& shape, ZHLN::FVec3 scale) -> JPH::ShapeRefC;
+    [[nodiscard]] auto CreateRigidBodyCore(const JPH::ShapeRefC& pinnedShape, ZHLN::DVec3 position, ZHLN::FVec4 rotation,
+                                           JPH::EMotionType motionType, Layers::ID layer, JPH::EActivation activation,
+                                           ZHLN::FVec3 velocity, uint32_t materialID, uint32_t category, uint32_t mask)
+        -> Physics::BodyID;
+    [[nodiscard]] auto CreateBodyImpl(const Physics::ShapeVariant& shape, const Physics::StaticBody& role, const Physics::BodyModifiers& mods)
+        -> Physics::StaticBodyID;
+    [[nodiscard]] auto CreateBodyImpl(const Physics::ShapeVariant& shape, const Physics::KinematicBody& role, const Physics::BodyModifiers& mods)
+        -> Physics::KinematicBodyID;
+    [[nodiscard]] auto CreateBodyImpl(const Physics::ShapeVariant& shape, const Physics::DynamicBody& role, const Physics::BodyModifiers& mods)
+        -> Physics::DynamicBodyID;
+    [[nodiscard]] auto CreateBodyImpl(const Physics::DualShape& shape, const Physics::CharacterBody& role, const Physics::BodyModifiers& mods)
+        -> Physics::CharacterID;
+    [[nodiscard]] auto CreateBodyImpl(const Physics::Capsule& shape, const Physics::CharacterBody& role, const Physics::BodyModifiers& mods)
+        -> Physics::CharacterID;
+    [[nodiscard]] auto CreateCharacterBody(const JPH::ShapeRefC& pinnedShape, float planeC, const Physics::CharacterBody& role,
+                                           const Physics::BodyModifiers& mods) -> Physics::BodyID;
     auto RegisterRagdoll(JPH::Ref<JPH::Ragdoll> ragdoll) -> Physics::RagdollID;
     std::unique_ptr<Impl> _impl;
 };

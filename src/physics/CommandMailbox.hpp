@@ -47,6 +47,10 @@ struct CreateRigidPayload {
     float            ry;
     float            rz;
     float            rw;
+    // Initial velocity for dynamic spawns (zero for every other role).
+    float            vx;
+    float            vy;
+    float            vz;
     uint32_t         precreatedBodyID;
     uint32_t         materialID;
     uint32_t         category;

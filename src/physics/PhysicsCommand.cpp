@@ -43,8 +43,9 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                     settings.mRestitution = mat.restitution;
 
                     if (c.motion == JPH::EMotionType::Dynamic) {
-                        settings.mAllowSleeping = true;
-                        settings.mMotionQuality = JPH::EMotionQuality::LinearCast;
+                        settings.mAllowSleeping  = true;
+                        settings.mMotionQuality  = JPH::EMotionQuality::LinearCast;
+                        settings.mLinearVelocity = JPH::Vec3(c.vx, c.vy, c.vz);
                     }
 
                     id = bodyInterface->CreateAndAddBody(
