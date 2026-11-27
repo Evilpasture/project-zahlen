@@ -107,8 +107,6 @@ auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const
 auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize) -> JPH::ShapeRefC;
 auto GetBodyID(const PhysicsWorld& world, Physics::BodyID handle) -> JPH::BodyID;
 
-auto CreateDualShape(const DualShape& shape = {}) -> JPH::ShapeRefC;
-
 } // namespace Physics
 
 class PhysicsContext {
@@ -143,42 +141,52 @@ class PhysicsContext {
     // One overload per role: the role node carries pose + motion policy, the
     // shape carries geometry, BodyModifiers carry material/filter/broadphase
     // details. Layer, activation and sleep policy are derived from the role,
-    // so they cannot contradict it at the call site.
+    // so they cannot contradict it at the call site. A FixedCompound converts
+    // to a runtime Compound inside WithShapeVariant (its node array lives in
+    // this frame); every other shape goes into the variant directly.
     template <Physics::StaticShape S, Physics::BodyModifier... Mods>
     [[nodiscard]] auto CreateBody(const S& shape, const Physics::StaticBody& role, const Mods&... mods) -> Physics::StaticBodyID {
-        return CreateBodyImpl(ShapeVariant {shape}, role, ResolveModifiers(mods...));
+        return WithShapeVariant(shape, [&](const Physics::ShapeVariant& variant) {
+            return CreateBodyImpl(variant, role, ResolveModifiers(mods...));
+        });
     }
     template <Physics::DynamicShape S, Physics::BodyModifier... Mods>
     [[nodiscard]] auto CreateBody(const S& shape, const Physics::KinematicBody& role, const Mods&... mods)
         -> Physics::KinematicBodyID {
-        return CreateBodyImpl(ShapeVariant {shape}, role, ResolveModifiers(mods...));
+        return WithShapeVariant(shape, [&](const Physics::ShapeVariant& variant) {
+            return CreateBodyImpl(variant, role, ResolveModifiers(mods...));
+        });
     }
     template <Physics::DynamicShape S, Physics::BodyModifier... Mods>
     [[nodiscard]] auto CreateBody(const S& shape, const Physics::DynamicBody& role, const Mods&... mods) -> Physics::DynamicBodyID {
-        return CreateBodyImpl(ShapeVariant {shape}, role, ResolveModifiers(mods...));
+        return WithShapeVariant(shape, [&](const Physics::ShapeVariant& variant) {
+            return CreateBodyImpl(variant, role, ResolveModifiers(mods...));
+        });
     }
     template <Physics::CharacterShape S, Physics::BodyModifier... Mods>
     [[nodiscard]] auto CreateBody(const S& shape, const Physics::CharacterBody& role, const Mods&... mods) -> Physics::CharacterID {
-        return CreateBodyImpl(shape, role, ResolveModifiers(mods...));
+        return WithShapeVariant(shape, [&](const Physics::ShapeVariant& variant) {
+            return CreateBodyImpl(variant, role, ResolveModifiers(mods...));
+        });
     }
     // Overloads for callers that already resolved modifiers (chain dispatchers).
     template <Physics::StaticShape S>
     [[nodiscard]] auto CreateBody(const S& shape, const Physics::StaticBody& role, const Physics::BodyModifiers& mods) -> Physics::StaticBodyID {
-        return CreateBodyImpl(ShapeVariant {shape}, role, mods);
+        return WithShapeVariant(shape, [&](const Physics::ShapeVariant& variant) { return CreateBodyImpl(variant, role, mods); });
     }
     template <Physics::DynamicShape S>
     [[nodiscard]] auto CreateBody(const S& shape, const Physics::KinematicBody& role, const Physics::BodyModifiers& mods)
         -> Physics::KinematicBodyID {
-        return CreateBodyImpl(ShapeVariant {shape}, role, mods);
+        return WithShapeVariant(shape, [&](const Physics::ShapeVariant& variant) { return CreateBodyImpl(variant, role, mods); });
     }
     template <Physics::DynamicShape S>
     [[nodiscard]] auto CreateBody(const S& shape, const Physics::DynamicBody& role, const Physics::BodyModifiers& mods)
         -> Physics::DynamicBodyID {
-        return CreateBodyImpl(ShapeVariant {shape}, role, mods);
+        return WithShapeVariant(shape, [&](const Physics::ShapeVariant& variant) { return CreateBodyImpl(variant, role, mods); });
     }
     template <Physics::CharacterShape S>
     [[nodiscard]] auto CreateBody(const S& shape, const Physics::CharacterBody& role, const Physics::BodyModifiers& mods) -> Physics::CharacterID {
-        return CreateBodyImpl(shape, role, mods);
+        return WithShapeVariant(shape, [&](const Physics::ShapeVariant& variant) { return CreateBodyImpl(variant, role, mods); });
     }
 
     // --- Role narrowing (ISimulation tier) ------------------------------------
@@ -335,6 +343,18 @@ class PhysicsContext {
     }
 
     // Jolt-facing plumbing behind the public CreateBody overloads.
+    // A FixedCompound stamps its node array here (in the CreateBody frame,
+    // which outlives the variant handed to CreateBodyImpl); everything else
+    // converts directly.
+    template <typename S>
+    [[nodiscard]] static auto WithShapeVariant(const S& shape, auto&& fn) {
+        if constexpr (Physics::kIsFixedCompound<S>) {
+            const auto nodes = shape.MakeNodes();
+            return fn(Physics::ShapeVariant {Physics::Compound {.children = nodes}});
+        } else {
+            return fn(Physics::ShapeVariant {shape});
+        }
+    }
     [[nodiscard]] auto ResolveShape(const Physics::ShapeVariant& shape, ZHLN::FVec3 scale) -> JPH::ShapeRefC;
     [[nodiscard]] auto CreateRigidBodyCore(const JPH::ShapeRefC& pinnedShape, ZHLN::DVec3 position, ZHLN::FVec4 rotation,
                                            JPH::EMotionType motionType, Layers::ID layer, JPH::EActivation activation,
@@ -346,11 +366,10 @@ class PhysicsContext {
         -> Physics::KinematicBodyID;
     [[nodiscard]] auto CreateBodyImpl(const Physics::ShapeVariant& shape, const Physics::DynamicBody& role, const Physics::BodyModifiers& mods)
         -> Physics::DynamicBodyID;
-    [[nodiscard]] auto CreateBodyImpl(const Physics::DualShape& shape, const Physics::CharacterBody& role, const Physics::BodyModifiers& mods)
+    [[nodiscard]] auto CreateBodyImpl(const Physics::ShapeVariant& shape, const Physics::CharacterBody& role, const Physics::BodyModifiers& mods)
         -> Physics::CharacterID;
-    [[nodiscard]] auto CreateBodyImpl(const Physics::Capsule& shape, const Physics::CharacterBody& role, const Physics::BodyModifiers& mods)
-        -> Physics::CharacterID;
-    [[nodiscard]] auto CreateCharacterBody(const JPH::ShapeRefC& pinnedShape, float planeC, const Physics::CharacterBody& role,
+    [[nodiscard]] auto CreateCharacterBody(const JPH::ShapeRefC& pinnedShape, const Physics::Plane& supportingVolume,
+                                           const Physics::CharacterBody& role,
                                            const Physics::BodyModifiers& mods) -> Physics::BodyID;
     auto RegisterRagdoll(JPH::Ref<JPH::Ragdoll> ragdoll) -> Physics::RagdollID;
     std::unique_ptr<Impl> _impl;

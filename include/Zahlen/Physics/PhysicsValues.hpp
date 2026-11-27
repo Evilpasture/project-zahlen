@@ -17,6 +17,7 @@
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
+#include <Zahlen/Physics/PhysicsShapes.hpp>
 #include <cstddef>
 #include <cmath>
 #include <concepts>
@@ -88,6 +89,9 @@ struct CharacterBody {
     float maxStrength              = 100.0f;
     float padding                  = 0.02f;
     float penetrationRecoverySpeed = 1.0f;
+    // Local-space half-space (n.Dot(p) + c <= 0) whose contacts count as
+    // floor support. Absent = lower half of the resolved shape's bounds.
+    COM::Option<Plane> supportingVolume {};
 };
 
 // --- Body creation modifiers ---------------------------------------------------

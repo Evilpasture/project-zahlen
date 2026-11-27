@@ -44,27 +44,18 @@ struct OwnedMesh {
 };
 
 struct OwnedCompound {
-    std::vector<Physics::Placed<Physics::Box>>          boxes;
-    std::vector<Physics::Placed<Physics::Sphere>>       spheres;
-    std::vector<Physics::Placed<Physics::Capsule>>      capsules;
-    std::vector<Physics::Placed<Physics::Cylinder>>     cylinders;
-    std::vector<Physics::Placed<Physics::Plane>>        planes;
-    std::vector<Physics::Placed<Physics::TriangleMesh>> meshes;
-    std::vector<Physics::Placed<Physics::MeshAsset>>    meshAssets;
+    // One variant vector in insertion order -- the order a spawn stamps into
+    // the chain, which is the compound's SubShapeID order.
+    std::vector<Physics::CompoundChild> children;
     // Mesh children only borrow spans into their source geometry; the owners
     // keep those snapshots alive for as long as the compound does.
     std::vector<std::shared_ptr<const Physics::MeshGeometry>> meshOwners;
 
-    [[nodiscard]] auto View() const noexcept -> Physics::Compound {
-        return Physics::Compound {
-            .boxes      = boxes,
-            .spheres    = spheres,
-            .capsules   = capsules,
-            .cylinders  = cylinders,
-            .planes     = planes,
-            .meshes     = meshes,
-            .meshAssets = meshAssets,
-        };
+    // Stamps the children into a caller-owned node scratch; the returned
+    // Compound views both that scratch and `children`, so both must outlive
+    // the body-creation call.
+    [[nodiscard]] auto View(std::vector<COM::ChainInNode>& scratch) const -> Physics::Compound {
+        return Physics::StampCompoundNodes(children, scratch);
     }
 };
 
@@ -95,7 +86,7 @@ using ModelCollider = std::variant<
 [[nodiscard]] inline auto MakePrefabBoxCollider(FVec3 halfExtents, FVec3 center = {}) -> ModelCollider {
     if (center == FVec3 {}) return Physics::Box {halfExtents};
     OwnedCompound compound;
-    compound.boxes.push_back({Physics::Box {halfExtents}, center});
+    compound.children.push_back(Physics::Placed<Physics::Box> {Physics::Box {halfExtents}, center});
     return compound;
 }
 
@@ -104,38 +95,32 @@ inline void AppendPrefabCollider(OwnedCompound& compound, const ModelCollider& s
         [&](const auto& shape) {
             using S = std::remove_cvref_t<decltype(shape)>;
             if constexpr (std::is_same_v<S, OwnedCompound>) {
-                compound.boxes.insert(compound.boxes.end(), shape.boxes.begin(), shape.boxes.end());
-                compound.spheres.insert(compound.spheres.end(), shape.spheres.begin(), shape.spheres.end());
-                compound.capsules.insert(compound.capsules.end(), shape.capsules.begin(), shape.capsules.end());
-                compound.cylinders.insert(compound.cylinders.end(), shape.cylinders.begin(), shape.cylinders.end());
-                compound.planes.insert(compound.planes.end(), shape.planes.begin(), shape.planes.end());
-                compound.meshes.insert(compound.meshes.end(), shape.meshes.begin(), shape.meshes.end());
-                compound.meshAssets.insert(compound.meshAssets.end(), shape.meshAssets.begin(), shape.meshAssets.end());
+                compound.children.insert(compound.children.end(), shape.children.begin(), shape.children.end());
                 compound.meshOwners.insert(compound.meshOwners.end(), shape.meshOwners.begin(), shape.meshOwners.end());
             } else if constexpr (std::is_same_v<S, OwnedMesh>) {
                 if (shape.geometry) {
                     compound.meshOwners.push_back(shape.geometry);
-                    compound.meshes.push_back(
-                        {Physics::TriangleMesh {shape.geometry->vertices, shape.geometry->indices}, {}}
-                    );
+                    compound.children.push_back(Physics::Placed<Physics::TriangleMesh> {
+                        Physics::TriangleMesh {shape.geometry->vertices, shape.geometry->indices}, {}});
                 } else {
                     // An unresolvable snapshot must keep failing the whole
                     // compound, exactly like the old null-mesh child.
-                    compound.meshes.push_back({Physics::TriangleMesh {}, {}});
+                    compound.children.push_back(
+                        Physics::Placed<Physics::TriangleMesh> {Physics::TriangleMesh {}, {}});
                 }
             } else if constexpr (std::is_same_v<S, Physics::Box>) {
-                compound.boxes.push_back({shape});
+                compound.children.push_back(Physics::Placed<Physics::Box> {shape});
             } else if constexpr (std::is_same_v<S, Physics::Sphere>) {
-                compound.spheres.push_back({shape});
+                compound.children.push_back(Physics::Placed<Physics::Sphere> {shape});
             } else if constexpr (std::is_same_v<S, Physics::Capsule>) {
-                compound.capsules.push_back({shape});
+                compound.children.push_back(Physics::Placed<Physics::Capsule> {shape});
             } else if constexpr (std::is_same_v<S, Physics::Cylinder>) {
-                compound.cylinders.push_back({shape});
+                compound.children.push_back(Physics::Placed<Physics::Cylinder> {shape});
             } else if constexpr (std::is_same_v<S, Physics::Plane>) {
-                compound.planes.push_back({shape});
+                compound.children.push_back(Physics::Placed<Physics::Plane> {shape});
             } else if constexpr (std::is_same_v<S, Physics::HeightField>) {
                 // Height fields cannot nest inside a compound; treat the
-                // same as "nothing to append" (the old variant had no
+                // same as "nothing to append" (the collider variant had no
                 // height-field alternative at all).
             }
         },

@@ -172,9 +172,11 @@ auto InstantiateMeshPart(
         // Collider -> runtime shape first, then the role decides whether the
         // shape family is allowed (a dynamic model with a mesh collider has
         // no legal role and spawns nothing, exactly as Jolt would have
-        // rejected it before).
-        const auto colliderShape = std::visit(
-            [](const auto& collider) -> std::optional<Physics::ShapeVariant> {
+        // rejected it before). compoundNodes holds the stamped children of an
+        // OwnedCompound across the body-creation call below.
+        std::vector<COM::ChainInNode> compoundNodes;
+        auto colliderShape = std::visit(
+            [&compoundNodes](const auto& collider) -> std::optional<Physics::ShapeVariant> {
                 using C = std::remove_cvref_t<decltype(collider)>;
                 if constexpr (std::is_same_v<C, std::monostate>) {
                     return std::nullopt;
@@ -183,13 +185,27 @@ auto InstantiateMeshPart(
                     return Physics::ShapeVariant {
                         Physics::TriangleMesh {collider.geometry->vertices, collider.geometry->indices}};
                 } else if constexpr (std::is_same_v<C, OwnedCompound>) {
-                    return Physics::ShapeVariant {collider.View()};
+                    return Physics::ShapeVariant {collider.View(compoundNodes)};
                 } else {
                     return Physics::ShapeVariant {collider};
                 }
             },
             *prep.shape
         );
+        // Compound children carry a role policy (statics accept planes and
+        // meshes; moving bodies convex + compound only). Reject a misfitting
+        // child here, before any shape reaches Jolt.
+        if (colliderShape.has_value() && std::holds_alternative<Physics::Compound>(*colliderShape)) {
+            const Physics::Compound& compound = std::get<Physics::Compound>(*colliderShape);
+            const bool               allowed  = (params.isStaticPhysics && !params.isKinematicPhysics)
+                                    ? Physics::ValidateCompound<
+                                          Physics::Box, Physics::Sphere, Physics::Capsule, Physics::Cylinder,
+                                          Physics::Plane, Physics::TriangleMesh, Physics::MeshAsset, Physics::Compound>(
+                                          compound)
+                                    : Physics::ValidateCompound<Physics::Box, Physics::Sphere, Physics::Capsule,
+                                                                Physics::Cylinder, Physics::Compound>(compound);
+            if (!allowed) colliderShape.reset();
+        }
         if (colliderShape.has_value()) {
             body = std::visit(
                 [&]<typename S>(const S& shape) -> Physics::BodyID {

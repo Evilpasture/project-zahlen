@@ -714,7 +714,7 @@ auto main(int argc, char* argv[]) -> int {
 
     const ZHLN::Locomotion::PrefabBounds bounds =
         rigInfo ? ZHLN::Locomotion::MeasurePrefabBounds(*rigInfo) : ZHLN::Locomotion::PrefabBounds {};
-    const ZHLN::Physics::DualShape dualShapeConfig = ZHLN::Locomotion::FitDualShapeToBounds(bounds);
+    const auto dualShapeConfig = ZHLN::Locomotion::FitDualShapeToBounds(bounds);
     if (bounds.valid) {
         const FVec3 size = bounds.GetSize();
         ZHLN::COM::Log(engine->Logger(),
@@ -731,7 +731,12 @@ auto main(int argc, char* argv[]) -> int {
 
     constexpr float    kWalkSpeed = 2.40f;
     constexpr float    kJumpForce = 7.00f;
-    const auto playerBody = engine->Simulation()->CreateCharacterRaw(ZHLN::COM::InChain(ZHLN::Physics::CharacterBody {.position = {0.0, 1.20, 0.0}}, dualShapeConfig)).value;
+    const auto playerBody = engine->Simulation()->CreateBody(
+        ZHLN::Locomotion::MakeDualCollider(dualShapeConfig),
+        ZHLN::Physics::CharacterBody {
+            .position         = {0.0, 1.20, 0.0},
+            .supportingVolume = ZHLN::Physics::Plane {{0.0f, 1.0f, 0.0f}, -dualShapeConfig.GetLifterOffsetY()},
+        }).value;
     const ZHLN::Entity player = engine->Entities()->Spawn(
         ZHLN::Components::TransformComponent {.position = {0.0f, 1.20f, 0.0f}},
         ZHLN::Components::PhysicsComponent {.physicsID = playerBody, .isStatic = false}

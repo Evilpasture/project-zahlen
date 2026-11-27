@@ -131,11 +131,20 @@ struct PhysicsTestSuite {
             ));
             ZHLN::Test::ExpectTrue(floor.HasValue());
 
-            const ZHLN::Physics::DualShape hull {};
-            const auto character = sim.CreateCharacterRaw(ZHLN::COM::InChain(
+            // The old default DualShape recipe (lifter sphere + bumper
+            // capsule at the sqrt offset), now a first-class compound. The
+            // explicit supporting volume keeps the lifter-centre plane the
+            // DualShape path always used.
+            const auto hull = ZHLN::Physics::MakeCompound(
+                ZHLN::Physics::Placed<ZHLN::Physics::Sphere> {ZHLN::Physics::Sphere {0.40F}, {0.0F, 0.40F, 0.0F}},
+                ZHLN::Physics::Placed<ZHLN::Physics::Capsule> {ZHLN::Physics::Capsule {0.20F, 0.50F},
+                                                               {0.0F, 0.82F, 0.0F}});
+            const auto character = sim.CreateBody(
                 hull,
-                ZHLN::Physics::CharacterBody {.position = DVec3 {0.0, 0.15, 0.0}}
-            ));
+                ZHLN::Physics::CharacterBody {
+                    .position         = DVec3 {0.0, 0.15, 0.0},
+                    .supportingVolume = ZHLN::Physics::Plane {{0.0f, 1.0f, 0.0f}, -0.40F},
+                });
             ZHLN::Test::ExpectTrue(character.HasValue());
             ZHLN::Test::ExpectTrue(sim.CharacterGroundOffset(character.value) >= 0.0f);
 

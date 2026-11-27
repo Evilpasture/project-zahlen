@@ -31,15 +31,19 @@ namespace ZHLN::Locomotion {
 
 namespace {
 
-[[nodiscard]] auto CreateCharacterBody(COM::ISimulation& sim, FVec3 footPosition, const Physics::DualShape& config) -> Physics::BodyID {
+[[nodiscard]] auto CreateCharacterBody(COM::ISimulation& sim, FVec3 footPosition, const DualShape& config) -> Physics::BodyID {
     const Physics::CharacterBody role {
         .position                 = footPosition.Cast<double>(),
         .maxSlopeAngle            = DegF {50.0f}.ToRadians(),
         .maxStrength              = 120.0f,
         .padding                  = 0.02f,
         .penetrationRecoverySpeed = 1.0f,
+        // The lifter centre sits one radius above the sole; contacts up to it
+        // count as floor support (the plane the DualShape recipe always
+        // used), spelled explicitly now that the default is bounds-derived.
+        .supportingVolume = Physics::Plane {{0.0f, 1.0f, 0.0f}, -config.GetLifterOffsetY()},
     };
-    const auto res = sim.CreateCharacterRaw(COM::InChain(config, role));
+    const auto res = sim.CreateBody(MakeDualCollider(config), role);
     return res.HasValue() ? Physics::BodyID(res.value) : Physics::BodyID {};
 }
 
@@ -116,7 +120,7 @@ auto SpawnCharacter(
     }
     const Entity entity = spawned.front();
 
-    const Physics::DualShape shapeConfig    = FitDualShapeToBounds(scaledBounds, setup);
+    const DualShape shapeConfig    = FitDualShapeToBounds(scaledBounds, setup);
     const Physics::BodyID          physicsID      = CreateCharacterBody(*sim, spawnFootPosition, shapeConfig);
     const float                    sprintMult     = setup.walkSpeed > 1.0e-4f ? setup.sprintSpeed / setup.walkSpeed : 1.65f;
     entities->Attach(entity, Components::PhysicsComponent {.physicsID = physicsID, .isStatic = false});

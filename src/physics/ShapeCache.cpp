@@ -184,32 +184,55 @@ auto ShapeCache::Resolve(const HeightField& shape) -> JPH::ShapeRefC {
     return Physics::CreateHeightFieldShape(shape.heights.data(), static_cast<int>(shape.sampleCount), shape.worldSize);
 }
 
-auto ShapeCache::Resolve(const Compound& shape) -> JPH::ShapeRefC {
-    const size_t childCount = shape.boxes.size() + shape.spheres.size() + shape.capsules.size() + shape.cylinders.size() +
-                              shape.planes.size() + shape.meshes.size() + shape.meshAssets.size();
-    if (childCount == 0) return nullptr;
+namespace {
+
+// One pass over a Compound's children in insertion order (the SubShapeID
+// order), stamp-verified through the shared dispatch: every child must carry
+// the ChainInNode identity of a Placed<T> payload, nested compounds recurse
+// through this same builder (bounded by kMaxCompoundDepth), and any foreign
+// stamp or unresolvable child fails the whole shape. This is structural
+// only -- role policy lives at the CreateBody boundary.
+[[nodiscard]] auto MakeCompoundShape(ShapeCache& cache, const Compound& compound, uint32_t depth) -> JPH::ShapeRefC {
+    if (compound.children.data == nullptr || compound.children.size == 0) return nullptr;
+    if (depth >= kMaxCompoundDepth) return nullptr;
 
     JPH::StaticCompoundShapeSettings settings;
-    const auto addChildren = [&settings](const auto& children, auto&& onShape) -> bool {
-        for (const auto& child: children) {
-            auto resolved = onShape(child.shape);
-            if (!resolved) return false;
-            const auto& p = child.position;
-            const auto& r = child.rotation;
-            settings.AddShape(JPH::Vec3(p.x, p.y, p.z), JPH::Quat(r.x, r.y, r.z, r.w), resolved);
-        }
-        return true;
-    };
-    if (!addChildren(shape.boxes, [this](const Box& s) { return Resolve(s); })) return nullptr;
-    if (!addChildren(shape.spheres, [this](const Sphere& s) { return Resolve(s); })) return nullptr;
-    if (!addChildren(shape.capsules, [this](const Capsule& s) { return Resolve(s); })) return nullptr;
-    if (!addChildren(shape.cylinders, [this](const Cylinder& s) { return Resolve(s); })) return nullptr;
-    if (!addChildren(shape.planes, [this](const Plane& s) { return Resolve(s); })) return nullptr;
-    if (!addChildren(shape.meshes, [this](const TriangleMesh& s) { return Resolve(s); })) return nullptr;
-    if (!addChildren(shape.meshAssets, [this](const MeshAsset& s) { return Resolve(s); })) return nullptr;
+    for (size_t index = 0; index < compound.children.size; ++index) {
+        bool valid   = true;
+        const bool matched = VisitCompoundChild<Box, Sphere, Capsule, Cylinder, Plane, TriangleMesh, MeshAsset, Compound>(
+            compound.children[index], [&](const auto& child) {
+                using T = std::remove_cvref_t<decltype(child)>;
+                if constexpr (std::is_same_v<T, Placed<Compound>>) {
+                    const JPH::ShapeRefC nested = MakeCompoundShape(cache, child.shape, depth + 1U);
+                    if (!nested) {
+                        valid = false;
+                        return;
+                    }
+                    settings.AddShape(JPH::Vec3(child.position.x, child.position.y, child.position.z),
+                                      JPH::Quat(child.rotation.x, child.rotation.y, child.rotation.z, child.rotation.w),
+                                      nested);
+                } else {
+                    const JPH::ShapeRefC resolved = cache.Resolve(child.shape);
+                    if (!resolved) {
+                        valid = false;
+                        return;
+                    }
+                    settings.AddShape(JPH::Vec3(child.position.x, child.position.y, child.position.z),
+                                      JPH::Quat(child.rotation.x, child.rotation.y, child.rotation.z, child.rotation.w),
+                                      resolved);
+                }
+            });
+        if (!matched || !valid) return nullptr;
+    }
 
     auto result = settings.Create();
     return result.IsValid() ? result.Get() : nullptr;
+}
+
+} // namespace
+
+auto ShapeCache::Resolve(const Compound& shape) -> JPH::ShapeRefC {
+    return MakeCompoundShape(*this, shape, 0U);
 }
 
 void ShapeCache::ClearMeshes() noexcept {

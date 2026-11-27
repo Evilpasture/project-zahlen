@@ -99,7 +99,7 @@ struct ISimulation : IObject {
     // subset of SurfaceMaterial / CollisionFilter / MovingBroadphase. Each
     // method enforces the shape family its role allows: statics accept the
     // full set, kinematic/dynamic accept convex + compound (meshes cannot be
-    // dynamic), characters accept Capsule and DualShape.
+    // dynamic), characters accept any convex primitive or compound.
     [[nodiscard]] virtual Result<Physics::StaticBodyID> CreateStaticBodyRaw(const ChainInNode* shapeChain) noexcept = 0;
     [[nodiscard]] virtual Result<Physics::KinematicBodyID> CreateKinematicBodyRaw(const ChainInNode* shapeChain) noexcept = 0;
     [[nodiscard]] virtual Result<Physics::DynamicBodyID> CreateDynamicBodyRaw(const ChainInNode* shapeChain) noexcept = 0;
@@ -128,6 +128,63 @@ struct ISimulation : IObject {
     auto CreateSphereBody(float radius, const Physics::DynamicBody& role = {}) noexcept
         -> Result<Physics::DynamicBodyID> {
         return CreateDynamicBodyRaw(InChain(Physics::Sphere {.radius = radius}, role));
+    }
+
+    // Typed creation without a hand-built chain: the shape and role travel as
+    // values, the chain is assembled here. A FixedCompound stamps its node
+    // array into this frame and goes through the same raw as any other
+    // compound -- the requires-clause is the role's child policy, so a
+    // FixedCompound<Placed<Plane>> into a dynamic body fails at compile time.
+    template <Physics::StaticShape S, Physics::BodyModifier... Mods>
+    [[nodiscard]] auto CreateBody(const S& shape, const Physics::StaticBody& role, const Mods&... mods) noexcept
+        -> Result<Physics::StaticBodyID> {
+        return CreateStaticBodyRaw(InChain(shape, role, mods...));
+    }
+    template <typename... Children, Physics::BodyModifier... Mods>
+        requires (Physics::StaticCompoundChild<Children> && ...)
+    [[nodiscard]] auto CreateBody(const Physics::FixedCompound<Children...>& shape, const Physics::StaticBody& role,
+                                  const Mods&... mods) noexcept -> Result<Physics::StaticBodyID> {
+        const auto nodes = shape.MakeNodes();
+        return CreateStaticBodyRaw(InChain(Physics::Compound {.children = nodes}, role, mods...));
+    }
+
+    template <Physics::DynamicShape S, Physics::BodyModifier... Mods>
+    [[nodiscard]] auto CreateBody(const S& shape, const Physics::KinematicBody& role, const Mods&... mods) noexcept
+        -> Result<Physics::KinematicBodyID> {
+        return CreateKinematicBodyRaw(InChain(shape, role, mods...));
+    }
+    template <typename... Children, Physics::BodyModifier... Mods>
+        requires (Physics::DynamicCompoundChild<Children> && ...)
+    [[nodiscard]] auto CreateBody(const Physics::FixedCompound<Children...>& shape, const Physics::KinematicBody& role,
+                                  const Mods&... mods) noexcept -> Result<Physics::KinematicBodyID> {
+        const auto nodes = shape.MakeNodes();
+        return CreateKinematicBodyRaw(InChain(Physics::Compound {.children = nodes}, role, mods...));
+    }
+
+    template <Physics::DynamicShape S, Physics::BodyModifier... Mods>
+    [[nodiscard]] auto CreateBody(const S& shape, const Physics::DynamicBody& role, const Mods&... mods) noexcept
+        -> Result<Physics::DynamicBodyID> {
+        return CreateDynamicBodyRaw(InChain(shape, role, mods...));
+    }
+    template <typename... Children, Physics::BodyModifier... Mods>
+        requires (Physics::DynamicCompoundChild<Children> && ...)
+    [[nodiscard]] auto CreateBody(const Physics::FixedCompound<Children...>& shape, const Physics::DynamicBody& role,
+                                  const Mods&... mods) noexcept -> Result<Physics::DynamicBodyID> {
+        const auto nodes = shape.MakeNodes();
+        return CreateDynamicBodyRaw(InChain(Physics::Compound {.children = nodes}, role, mods...));
+    }
+
+    template <Physics::CharacterShape S, Physics::BodyModifier... Mods>
+    [[nodiscard]] auto CreateBody(const S& shape, const Physics::CharacterBody& role, const Mods&... mods) noexcept
+        -> Result<Physics::CharacterID> {
+        return CreateCharacterRaw(InChain(shape, role, mods...));
+    }
+    template <typename... Children, Physics::BodyModifier... Mods>
+        requires (Physics::DynamicCompoundChild<Children> && ...)
+    [[nodiscard]] auto CreateBody(const Physics::FixedCompound<Children...>& shape, const Physics::CharacterBody& role,
+                                  const Mods&... mods) noexcept -> Result<Physics::CharacterID> {
+        const auto nodes = shape.MakeNodes();
+        return CreateCharacterRaw(InChain(Physics::Compound {.children = nodes}, role, mods...));
     }
 
     [[nodiscard]] auto Raycast(DVec3 origin, FVec3 direction) const noexcept -> Physics::RaycastResult {

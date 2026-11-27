@@ -316,18 +316,12 @@ void CheckSimulation(ZHLN::COM::ISimulation& simulation) {
     const auto sphereRes = simulation.CreateSphereBody(0.5F, ZHLN::Physics::DynamicBody {.position = {0.0, 4.0, 0.0}});
     ZHLN::Test::ExpectTrue(sphereRes.HasValue());
 
-    const std::array<ZHLN::Physics::Placed<ZHLN::Physics::Box>, 1> compoundBoxes {
-        ZHLN::Physics::Placed<ZHLN::Physics::Box> {{0.25F, 0.25F, 0.25F}, {-0.5F, 0.0F, 0.0F}},
-    };
-    const std::array<ZHLN::Physics::Placed<ZHLN::Physics::Sphere>, 1> compoundSpheres {
-        ZHLN::Physics::Placed<ZHLN::Physics::Sphere> {0.25F, {0.5F, 0.0F, 0.0F}},
-    };
-    const auto compoundRes = simulation.CreateDynamicBodyRaw(ZHLN::COM::InChain(
-        ZHLN::Physics::Compound {
-            .boxes   = compoundBoxes,
-            .spheres = compoundSpheres,
-        },
-        ZHLN::Physics::DynamicBody {.position = {3.0, 2.0, 0.0}}));
+    const auto compoundRes = simulation.CreateBody(
+        ZHLN::Physics::MakeCompound(
+            ZHLN::Physics::Placed<ZHLN::Physics::Box> {ZHLN::Physics::Box {{0.25F, 0.25F, 0.25F}},
+                                                       {-0.5F, 0.0F, 0.0F}},
+            ZHLN::Physics::Placed<ZHLN::Physics::Sphere> {ZHLN::Physics::Sphere {0.25F}, {0.5F, 0.0F, 0.0F}}),
+        ZHLN::Physics::DynamicBody {.position = {3.0, 2.0, 0.0}});
     ZHLN::Test::ExpectTrue(compoundRes.HasValue());
 
     if (floorRes.HasValue() && sphereRes.HasValue() && compoundRes.HasValue()) {

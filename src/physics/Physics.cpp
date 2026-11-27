@@ -478,28 +478,25 @@ auto PhysicsContext::CreateBodyImpl(const Physics::ShapeVariant& shape, const Ph
     return Physics::DynamicBodyID::From(body);
 }
 
-auto PhysicsContext::CreateBodyImpl(const Physics::DualShape& shape, const Physics::CharacterBody& role, const Physics::BodyModifiers& mods)
-    -> Physics::CharacterID {
-    const JPH::ShapeRefC charShape = CreateDualShape(shape);
+auto PhysicsContext::CreateBodyImpl(const Physics::ShapeVariant& shape, const Physics::CharacterBody& role,
+                                     const Physics::BodyModifiers& mods) -> Physics::CharacterID {
+    const JPH::ShapeRefC charShape =
+        std::visit([this](const auto& variant) -> JPH::ShapeRefC { return _impl->shapeCache.Resolve(variant); }, shape);
     if (charShape == nullptr) {
         return Physics::CharacterID::Null();
     }
-    // Lifter centre sits above the sole by GetLifterOffsetY(); the supporting
-    // plane rests exactly on the feet (the old DualShape default).
-    const float planeC = -shape.GetLifterOffsetY();
-    return Physics::CharacterID::From(CreateCharacterBody(charShape, planeC, role, mods));
-}
-
-auto PhysicsContext::CreateBodyImpl(const Physics::Capsule& shape, const Physics::CharacterBody& role, const Physics::BodyModifiers& mods)
-    -> Physics::CharacterID {
-    const JPH::ShapeRefC charShape = _impl->shapeCache.Resolve(shape);
-    if (charShape == nullptr) {
-        return Physics::CharacterID::Null();
+    // Jolt's plane is X . Normal + Constant = 0, so the supporting half-space
+    // is n.p + c <= 0. An explicit CharacterBody::supportingVolume ships its
+    // components verbatim; absent, the lower half of the resolved shape's
+    // bounds (contacts up to the bounds' mid-height count as floor support).
+    Physics::Plane supportingVolume {};
+    if (role.supportingVolume.HasValue()) {
+        supportingVolume = role.supportingVolume.value;
+    } else {
+        const JPH::AABox bounds = charShape->GetLocalBounds();
+        supportingVolume        = Physics::Plane {.constant = -(bounds.mMin.GetY() + bounds.mMax.GetY()) * 0.5F};
     }
-    // The old non-custom default: supporting plane 0.4 below the capsule
-    // centre (sole depth for the 0.3-radius hull).
-    constexpr float kCapsulePlaneC = -0.4f;
-    return Physics::CharacterID::From(CreateCharacterBody(charShape, kCapsulePlaneC, role, mods));
+    return Physics::CharacterID::From(CreateCharacterBody(charShape, supportingVolume, role, mods));
 }
 
 namespace Physics {
@@ -570,30 +567,14 @@ auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSi
     return result.HasError() ? nullptr : result.Get();
 }
 
-auto CreateDualShape(const DualShape& config) -> JPH::ShapeRefC {
-    JPH::StaticCompoundShapeSettings compound;
-
-    const JPH::ShapeRefC lifterShape = new JPH::SphereShape(config.lifterRadius);
-    compound.AddShape(JPH::Vec3(0.0f, config.GetLifterOffsetY(), 0.0f), JPH::Quat::sIdentity(), lifterShape);
-
-    const float          cylinderHalfHeight = std::max(0.001f, config.bumperRadiusY - config.bumperRadiusXZ);
-    const JPH::ShapeRefC bumperShape        = (config.bumperRadiusY > config.bumperRadiusXZ) ?
-                                                  static_cast<JPH::ShapeRefC>(new JPH::CapsuleShape(cylinderHalfHeight, config.bumperRadiusXZ)) :
-                                                  static_cast<JPH::ShapeRefC>(new JPH::SphereShape(config.bumperRadiusXZ));
-
-    compound.AddShape(JPH::Vec3(0.0f, config.GetBumperOffsetY(), 0.0f), JPH::Quat::sIdentity(), bumperShape);
-
-    const auto res = compound.Create();
-    return res.HasError() ? nullptr : res.Get();
-}
-
 } // namespace Physics
 
 auto PhysicsContext::CharacterVelocity(Physics::CharacterID handle) const -> ZHLN::FVec3 {
     return Physics::FromJoltVector(GetCharacterVelocity(handle));
 }
 
-auto PhysicsContext::CreateCharacterBody(const JPH::ShapeRefC& pinnedShape, float planeC, const Physics::CharacterBody& role,
+auto PhysicsContext::CreateCharacterBody(const JPH::ShapeRefC& pinnedShape, const Physics::Plane& supportingVolume,
+                                         const Physics::CharacterBody& role,
                                          const Physics::BodyModifiers& mods) -> Physics::BodyID {
     auto* impl  = _impl.get();
     auto& world = impl->world;
@@ -624,10 +605,10 @@ auto PhysicsContext::CreateCharacterBody(const JPH::ShapeRefC& pinnedShape, floa
         .maxStrength              = role.maxStrength,
         .characterPadding         = role.padding,
         .penetrationRecoverySpeed = role.penetrationRecoverySpeed,
-        .planeNx                  = 0.0f,
-        .planeNy                  = 1.0f,
-        .planeNz                  = 0.0f,
-        .planeC                   = planeC,
+        .planeNx                  = supportingVolume.normal.x,
+        .planeNy                  = supportingVolume.normal.y,
+        .planeNz                  = supportingVolume.normal.z,
+        .planeC                   = supportingVolume.constant,
         .category                 = mods.filter.category,
         .mask                     = mods.filter.mask,
     };

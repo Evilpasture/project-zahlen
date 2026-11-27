@@ -286,20 +286,9 @@ template <typename NodeT>
         if (node.heights.size() < totalSamples) return Error::InvalidArgument;
         built = node;
     } else if constexpr (std::is_same_v<NodeT, Physics::Compound>) {
-        const size_t childCount = node.boxes.size() + node.spheres.size() + node.capsules.size() +
-                                  node.cylinders.size() + node.planes.size() + node.meshes.size() +
-                                  node.meshAssets.size();
-        if (childCount == 0U) return Error::InvalidArgument;
-        for (const auto& child: node.boxes)
-            if (child.shape.halfExtents.x <= 0.0F || child.shape.halfExtents.y <= 0.0F ||
-                child.shape.halfExtents.z <= 0.0F)
-                return Error::InvalidArgument;
-        for (const auto& child: node.spheres)
-            if (child.shape.radius <= 0.0F) return Error::InvalidArgument;
-        for (const auto& child: node.capsules)
-            if (child.shape.halfHeight <= 0.0F || child.shape.radius <= 0.0F) return Error::InvalidArgument;
-        for (const auto& child: node.cylinders)
-            if (child.shape.halfHeight <= 0.0F || child.shape.radius <= 0.0F) return Error::InvalidArgument;
+        // Children are validated by the caller's role policy
+        // (ValidateCompound at the dispatch visit), not here: this parser
+        // only knows the node arrived as a Compound.
         built = node;
     }
     return {};
@@ -1418,6 +1407,13 @@ class Engine final:
         return std::visit(
             [&]<typename S>(const S& shape) -> Result<Physics::StaticBodyID> {
                 if constexpr (Physics::StaticShape<S>) {
+                    if constexpr (std::is_same_v<S, Physics::Compound>) {
+                        if (!Physics::ValidateCompound<Physics::Box, Physics::Sphere, Physics::Capsule,
+                                                      Physics::Cylinder, Physics::Plane, Physics::TriangleMesh,
+                                                      Physics::MeshAsset, Physics::Compound>(shape)) {
+                            return Error::InvalidArgument;
+                        }
+                    }
                     return Sim().CreateBody(shape, role, mods);
                 } else {
                     return Error::InvalidArgument;
@@ -1461,6 +1457,12 @@ class Engine final:
         return std::visit(
             [&]<typename S>(const S& shape) -> Result<Physics::KinematicBodyID> {
                 if constexpr (Physics::DynamicShape<S>) {
+                    if constexpr (std::is_same_v<S, Physics::Compound>) {
+                        if (!Physics::ValidateCompound<Physics::Box, Physics::Sphere, Physics::Capsule,
+                                                      Physics::Cylinder, Physics::Compound>(shape)) {
+                            return Error::InvalidArgument;
+                        }
+                    }
                     return Sim().CreateBody(shape, role, mods);
                 } else {
                     return Error::InvalidArgument;
@@ -1504,6 +1506,12 @@ class Engine final:
         return std::visit(
             [&]<typename S>(const S& shape) -> Result<Physics::DynamicBodyID> {
                 if constexpr (Physics::DynamicShape<S>) {
+                    if constexpr (std::is_same_v<S, Physics::Compound>) {
+                        if (!Physics::ValidateCompound<Physics::Box, Physics::Sphere, Physics::Capsule,
+                                                      Physics::Cylinder, Physics::Compound>(shape)) {
+                            return Error::InvalidArgument;
+                        }
+                    }
                     return Sim().CreateBody(shape, role, mods);
                 } else {
                     return Error::InvalidArgument;
@@ -1523,34 +1531,41 @@ class Engine final:
         Physics::CharacterBody    role {};
         Physics::BodyModifiers    mods {};
         uint32_t                  shapeNodeCount = 0;
-        std::optional<Physics::Capsule>   capsule {};
-        std::optional<Physics::DualShape> dual {};
+        std::optional<Physics::ShapeVariant> builtShape;
 
-        const Result<void> chainRes = DispatchInChain<Physics::Capsule, Physics::DualShape, Physics::CharacterBody,
-                                                      Physics::CollisionFilter>(
-            shapeChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
-                if constexpr (std::is_same_v<NodeT, Physics::CharacterBody>) {
-                    role = node;
-                } else if constexpr (std::is_same_v<NodeT, Physics::CollisionFilter>) {
-                    mods.filter = node;
-                } else {
-                    ++shapeNodeCount;
-                    if constexpr (std::is_same_v<NodeT, Physics::Capsule>) {
-                        if (node.halfHeight <= 0.0F || node.radius <= 0.0F) return Error::InvalidArgument;
-                        capsule = node;
+        const Result<void> chainRes =
+            DispatchInChain<Physics::Box, Physics::Sphere, Physics::Capsule, Physics::Cylinder, Physics::Compound,
+                            Physics::CharacterBody, Physics::CollisionFilter>(
+                shapeChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
+                    if constexpr (std::is_same_v<NodeT, Physics::CharacterBody>) {
+                        role = node;
+                    } else if constexpr (std::is_same_v<NodeT, Physics::CollisionFilter>) {
+                        mods.filter = node;
                     } else {
-                        if (node.lifterRadius <= 0.0F || node.bumperRadiusXZ <= 0.0F || node.bumperRadiusY <= 0.0F) {
+                        ++shapeNodeCount;
+                        return ParseShapeNode(node, builtShape);
+                    }
+                    return {};
+                });
+        if (!chainRes.HasValue()) return chainRes.error;
+        if (shapeNodeCount != 1U || !builtShape.has_value()) return Error::InvalidArgument;
+
+        return std::visit(
+            [&]<typename S>(const S& shape) -> Result<Physics::CharacterID> {
+                if constexpr (Physics::CharacterShape<S>) {
+                    if constexpr (std::is_same_v<S, Physics::Compound>) {
+                        if (!Physics::ValidateCompound<Physics::Box, Physics::Sphere, Physics::Capsule,
+                                                      Physics::Cylinder, Physics::Compound>(shape)) {
                             return Error::InvalidArgument;
                         }
-                        dual = node;
                     }
+                    return Sim().CreateBody(shape, role, mods);
+                } else {
+                    return Error::InvalidArgument;
                 }
-                return {};
-            });
-        if (!chainRes.HasValue()) return chainRes.error;
-        if (shapeNodeCount != 1U || (capsule.has_value() == dual.has_value())) return Error::InvalidArgument;
-        if (dual.has_value()) return Sim().CreateBody(*dual, role, mods);
-        return Sim().CreateBody(*capsule, role, mods);
+            },
+            *builtShape
+        );
     }
 
     [[nodiscard]] Physics::DebugDrawData DebugGeometry(bool shapes, bool constraints, bool wireframe) noexcept override {
@@ -2131,9 +2146,8 @@ class Engine final:
                 // A missing snapshot keeps the old semantics: an unresolvable
                 // mesh child makes the whole compound fail to build, so the
                 // body is never created.
-                combined.meshes.push_back(
-                    {extra ? Physics::TriangleMesh {extra->vertices, extra->indices} : Physics::TriangleMesh {}, {}}
-                );
+                combined.children.push_back(Physics::Placed<Physics::TriangleMesh> {
+                    extra ? Physics::TriangleMesh {extra->vertices, extra->indices} : Physics::TriangleMesh {}, {}});
                 part.meshCollider = std::move(combined);
             }
             prefab->parts.push_back(std::move(part));

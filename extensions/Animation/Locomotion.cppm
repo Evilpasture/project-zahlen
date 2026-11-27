@@ -15,6 +15,7 @@ module;
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Physics/PhysicsShapes.hpp>
 #include <Zahlen/Physics/PhysicsValues.hpp>
 #include <algorithm>
 #include <cmath>
@@ -25,6 +26,29 @@ module;
 export module ZHLN.Locomotion;
 
 export namespace ZHLN::Locomotion {
+
+// Overgrowth-style dual-shape character recipe (lower lifter sphere + upper
+// oval bumper). This lived in PhysicsShapes.hpp until compounds became
+// first-class; the spawn path now turns it into a normal Compound through
+// MakeDualCollider, and the supporting plane through
+// CharacterBody::supportingVolume. Character silhouettes only.
+struct DualShape {
+    float lifterRadius   = 0.40F;
+    float bumperRadiusXZ = 0.50F;
+    float bumperRadiusY  = 0.70F;
+
+    [[nodiscard]] constexpr auto GetLifterOffsetY() const noexcept -> float {
+        return lifterRadius;
+    }
+
+    [[nodiscard]] auto GetBumperOffsetY() const noexcept -> float {
+        const float ratio = lifterRadius / bumperRadiusXZ;
+        if (ratio >= 1.0F) {
+            return lifterRadius;
+        }
+        return lifterRadius + (bumperRadiusY * std::sqrt(1.0F - (ratio * ratio)));
+    }
+};
 
 struct CharacterSetup {
     float                    targetHeight            = 1.80f;
@@ -43,7 +67,7 @@ struct CharacterSetup {
     float                    cameraLookSensitivity   = 0.12f;
     float                    cameraPositionSmoothing = 14.0f;
     bool                     cameraAlignYawToTarget  = true;
-    Physics::DualShape colliderShape {};
+    DualShape colliderShape {};
 };
 
 struct CharacterSpawnResult {
@@ -52,7 +76,7 @@ struct CharacterSpawnResult {
     FVec3                    boundsSize    = FVec3::Zero();
     float                    height        = 0.0f;
     float                    groundOffset  = 0.0f;
-    Physics::DualShape colliderShape {};
+    DualShape colliderShape {};
     bool                     valid         = false;
 };
 
@@ -108,7 +132,7 @@ struct PrefabBounds {
     return bounds;
 }
 
-[[nodiscard]] auto FitDualShapeToBounds(const PrefabBounds& bounds, const CharacterSetup& setup = {}) noexcept -> Physics::DualShape {
+[[nodiscard]] auto FitDualShapeToBounds(const PrefabBounds& bounds, const CharacterSetup& setup = {}) noexcept -> DualShape {
     if (!bounds.valid) return setup.colliderShape;
     const FVec3 size             = bounds.GetSize();
     const float horizontalExtent = std::max(size.x, size.z) * 0.5f;
@@ -122,10 +146,10 @@ struct PrefabBounds {
     const float blendFactor   = 1.0f + std::sqrt(std::max(0.0f, 1.0f - (ratio * ratio)));
     const float desiredTop    = std::max(height - setup.colliderBottomMargin, lifterRadius * 2.1f);
     const float bumperRadiusY = std::max((desiredTop - lifterRadius) / blendFactor, lifterRadius * 0.65f);
-    return Physics::DualShape {.lifterRadius = lifterRadius, .bumperRadiusXZ = bumperRadiusXZ, .bumperRadiusY = bumperRadiusY};
+    return DualShape {.lifterRadius = lifterRadius, .bumperRadiusXZ = bumperRadiusXZ, .bumperRadiusY = bumperRadiusY};
 }
 
-void DrawDualShapeDebug(COM::IDebugDraw& debug, FVec3 footPosition, const Physics::DualShape& config) {
+void DrawDualShapeDebug(COM::IDebugDraw& debug, FVec3 footPosition, const DualShape& config) {
     constexpr int   segments    = 28;
     constexpr FVec4 lifterColor = {0.15f, 0.90f, 1.00f, 1.0f};
     constexpr FVec4 bumperColor = {1.00f, 0.72f, 0.15f, 1.0f};
@@ -145,6 +169,21 @@ void DrawDualShapeDebug(COM::IDebugDraw& debug, FVec3 footPosition, const Physic
     drawEllipse(bumperCenter, {config.bumperRadiusXZ, 0.0f, 0.0f}, {0.0f, config.bumperRadiusY, 0.0f}, bumperColor);
     drawEllipse(bumperCenter, {0.0f, config.bumperRadiusY, 0.0f}, {0.0f, 0.0f, config.bumperRadiusXZ}, bumperColor);
     drawEllipse(bumperCenter, {config.bumperRadiusXZ, 0.0f, 0.0f}, {0.0f, 0.0f, config.bumperRadiusXZ}, bumperColor);
+}
+
+// The spawn collider for a DualShape: a normal Compound of a lifter sphere
+// and a capsule bumper -- the geometry Physics::CreateDualShape used to
+// build directly in Jolt, now first-class through the compound path. The
+// half-height formula preserves the old branch (a sphere-equivalent capsule
+// when the bumper is not taller than it is wide).
+[[nodiscard]] auto MakeDualCollider(const DualShape& config) noexcept
+    -> Physics::FixedCompound<Physics::Sphere, Physics::Capsule> {
+    const float bumperHalfHeight = std::max(0.001F, config.bumperRadiusY - config.bumperRadiusXZ);
+    return Physics::MakeCompound(
+        Physics::Placed<Physics::Sphere> {Physics::Sphere {config.lifterRadius},
+                                           {0.0F, config.GetLifterOffsetY(), 0.0F}},
+        Physics::Placed<Physics::Capsule> {Physics::Capsule {bumperHalfHeight, config.bumperRadiusXZ},
+                                           {0.0F, config.GetBumperOffsetY(), 0.0F}});
 }
 
 [[nodiscard]] auto SpawnCharacter(
