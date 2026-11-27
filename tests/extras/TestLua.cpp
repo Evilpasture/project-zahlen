@@ -239,8 +239,8 @@ struct LuaSuite {
         )lua";
 
         auto res = ZHLN::Lua::EvaluateString<SampleAggregate>(kChunk, "hydration");
-        if (!res) {
-            return std::unexpected(LuaSuiteFail::UnexpectedError);
+        if (!ZHLN::Test::ExpectFalse(!res)) {
+            return std::unexpected(res.error());
         }
 
         if (res->iterations != 12 || res->tier != 3 || res->label != "computed") {
@@ -302,8 +302,8 @@ struct LuaSuite {
         )lua";
 
         auto scene = ZHLN::Lua::EvaluateString<ZHLN::Scene::Document>(kSceneChunk, "ring_scene");
-        if (!scene) {
-            return std::unexpected(LuaSuiteFail::UnexpectedError);
+        if (!ZHLN::Test::ExpectFalse(!scene)) {
+            return std::unexpected(scene.error());
         }
         if (scene->name != "RingArena") {
             return std::unexpected(LuaSuiteFail::WrongValue);
@@ -349,8 +349,8 @@ struct LuaSuite {
         auto                hi = ZHLN::Lua::EvaluateCallString<ZHLN::GraphicsSettings>(
             kProfileFn, "graphics.lua", ZHLN::Lua::Budget {}, desktopGpu
         );
-        if (!hi) {
-            return std::unexpected(LuaSuiteFail::UnexpectedError);
+        if (!ZHLN::Test::ExpectFalse(!hi)) {
+            return std::unexpected(hi.error());
         }
         if (hi->qualityPreset != ZHLN::QualityLevel::Ultra || hi->antiAliasing.mode != ZHLN::AAMode::SMAA) {
             return std::unexpected(LuaSuiteFail::WrongValue);
@@ -363,8 +363,8 @@ struct LuaSuite {
         auto                lo = ZHLN::Lua::EvaluateCallString<ZHLN::GraphicsSettings>(
             kProfileFn, "graphics.lua", ZHLN::Lua::Budget {}, lowVramGpu
         );
-        if (!lo) {
-            return std::unexpected(LuaSuiteFail::UnexpectedError);
+        if (!ZHLN::Test::ExpectFalse(!lo)) {
+            return std::unexpected(lo.error());
         }
         if (lo->qualityPreset != ZHLN::QualityLevel::Medium || lo->rayTracing.enableReflections) {
             return std::unexpected(LuaSuiteFail::WrongValue);
@@ -379,8 +379,8 @@ struct LuaSuite {
         live.shadows.resolution = 4096;
 
         // 1. Partial nested patch updates bloomStrength while preserving sibling post.exposure.
-        if (auto ok = ZHLN::Lua::ApplyPatchString(live, "return { post = { bloomStrength = 0.18 } }"); !ok) {
-            return std::unexpected(LuaSuiteFail::UnexpectedError);
+        if (auto ok = ZHLN::Lua::ApplyPatchString(live, "return { post = { bloomStrength = 0.18 } }"); !ZHLN::Test::ExpectFalse(!ok)) {
+            return std::unexpected(ok.error());
         }
         if (!Near(live.post.exposure, 2.2f) || !Near(live.post.bloomStrength, 0.18f) || live.shadows.resolution != 4096) {
             return std::unexpected(LuaSuiteFail::WrongValue);
@@ -413,9 +413,8 @@ struct LuaSuite {
         if (auto vecOk = ZHLN::Lua::ApplyPatchString(
                 envComp,
                 "return { probeMin = { 0.9, 0.8, 0.7 }, skyZenith = { x = 0.1, y = 0.2, z = 0.3, w = 1.0 } }"
-            );
-            !vecOk) {
-            return std::unexpected(LuaSuiteFail::UnexpectedError);
+            ); !ZHLN::Test::ExpectFalse(!vecOk)) {
+            return std::unexpected(vecOk.error());
         }
         if (!Near(envComp.ambientExposure, 1.5f) || !Near(envComp.probeMin.y, 0.8f) || !Near(envComp.skyZenith.z, 0.3f)) {
             return std::unexpected(LuaSuiteFail::WrongValue);
@@ -424,8 +423,8 @@ struct LuaSuite {
         // Named and short sequence patches preserve untouched coordinates;
         // an invalid coordinate rolls back the entire struct.
         if (auto ok = ZHLN::Lua::ApplyPatchString(
-                envComp, "return { probeMin = { x = 0.4 }, skyZenith = { 0.6 } }"); !ok) {
-            return std::unexpected(LuaSuiteFail::UnexpectedError);
+                envComp, "return { probeMin = { x = 0.4 }, skyZenith = { 0.6 } }"); !ZHLN::Test::ExpectFalse(!ok)) {
+            return std::unexpected(ok.error());
         }
         if (!Near(envComp.probeMin.x, 0.4f) || !Near(envComp.probeMin.y, 0.8f) ||
             !Near(envComp.skyZenith.x, 0.6f) || !Near(envComp.skyZenith.z, 0.3f)) {
@@ -497,8 +496,11 @@ struct LuaSuite {
         )lua";
 
         auto probe = ZHLN::Lua::EvaluateString<SampleAggregate>(kSandboxProbe, "sandbox_probe");
-        if (!probe || probe->iterations != 7) {
-            return std::unexpected(LuaSuiteFail::UnexpectedError);
+        if (!ZHLN::Test::ExpectFalse(!probe)) {
+            return std::unexpected(probe.error());
+        }
+        if (!ZHLN::Test::ExpectFalse(probe->iterations != 7)) {
+            return std::unexpected(LuaSuiteFail::WrongValue);
         }
 
         // 2. Binary bytecode header ("\x1bLJ") must be rejected by text-only loader.
@@ -532,29 +534,17 @@ struct LuaSuite {
         }
 
         auto TestShippedConfigProfiles() -> std::expected<void, ZHLN::ErrorCode> {
-            const auto findConfig = [](std::string_view fileName) -> std::filesystem::path {
-                if (!ZHLN::ProjectRoot.empty()) {
-                    std::filesystem::path fromRoot = std::filesystem::path(ZHLN::ProjectRoot) / "config" / fileName;
-                    if (std::filesystem::exists(fromRoot)) {
-                        return fromRoot;
-                    }
-                }
-                for (std::string_view prefix: {"config", "../config", "../../config", "../../../config"}) {
-                    std::filesystem::path candidate = std::filesystem::path(prefix) / fileName;
-                    if (std::filesystem::exists(candidate)) {
-                        return candidate;
-                    }
-                }
-                return {};
-            };
-
-            const std::filesystem::path gfxPath = findConfig("graphics.lua");
-            if (gfxPath.empty()) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            // Deliberately goes through the runtime's own search path: if the
+            // build did not stage config/ next to the binary, this is where that
+            // shows up, and FileReadFailed names it instead of hiding it.
+            const auto gfxFound = ZHLN::FS::Paths::FindDataFile("config/graphics.lua");
+            if (!ZHLN::Test::ExpectFalse(!gfxFound)) {
+                return std::unexpected(ZHLN::Lua::Error::FileReadFailed);
             }
+            const std::filesystem::path gfxPath = *gfxFound;
             auto gfxSrc = ReadHostFileText(gfxPath);
-            if (!gfxSrc) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!gfxSrc)) {
+                return std::unexpected(gfxSrc.error());
             }
 
             const ZHLN::RenderInfo rtDesktop {
@@ -596,26 +586,26 @@ struct LuaSuite {
             }
             ZHLN::Lua::Budget budget {.maxInstructions = 16'384, .maxMemoryBytes = 2 * 1024 * 1024};
             auto            vm = ZHLN::Lua::VirtualMachine::Create(budget);
-            if (!vm) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!vm)) {
+                return std::unexpected(vm.error());
             }
 
             static constexpr std::array<ZHLN::Lua::MethodEntry, 1> kVec2Methods = {{
                 {"LengthSq", &PodVec2LengthSq},
             }};
-            if (!vm->RegisterUserdataType<PodVec2>(ZHLN::Lua::MetatableSpec {
+            if (auto vec2Reg = vm->RegisterUserdataType<PodVec2>(ZHLN::Lua::MetatableSpec {
                     .debugName = "Test.PodVec2",
                     .index     = &PodVec2Index,
                     .add       = &PodVec2Add,
                     .methods   = kVec2Methods,
-                })) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+                }); !ZHLN::Test::ExpectFalse(!vec2Reg)) {
+                return std::unexpected(vec2Reg.error());
             }
-            if (!vm->RegisterUserdataType<PodEntityRef>(ZHLN::Lua::MetatableSpec {
+            if (auto entityReg = vm->RegisterUserdataType<PodEntityRef>(ZHLN::Lua::MetatableSpec {
                     .debugName = "Test.PodEntityRef",
                     .eq        = &PodEntityEq,
-                })) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+                }); !ZHLN::Test::ExpectFalse(!entityReg)) {
+                return std::unexpected(entityReg.error());
             }
 
             InteropCounterHost host {};
@@ -635,12 +625,12 @@ struct LuaSuite {
                 frame.SetGlobalTop("Report");
             };
             const auto setupOk = vm->WithFrame(populateGlobals);
-            if (!setupOk) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!setupOk)) {
+                return std::unexpected(setupOk.error());
             }
 
             // Verify POD userdata arithmetic, methods, metatable hiding, and interned identity.
-            if (!vm->ExecuteString(R"lua(
+            if (auto execRes = vm->ExecuteString(R"lua(
                 local a = Vec2.new(3, 4)
                 local b = Vec2.new(1, -1)
                 local c = a + b
@@ -657,8 +647,8 @@ struct LuaSuite {
                 assert(OnStep(function(delta, vec)
                     Report(delta + vec:LengthSq())
                 end))
-            )lua")) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            )lua"); !ZHLN::Test::ExpectFalse(!execRes)) {
+                return std::unexpected(execRes.error());
             }
 
             if (!vm->HasListener(host.listener)) {
@@ -669,8 +659,8 @@ struct LuaSuite {
                 frame.PushInt64(5);
                 frame.PushUserdata(PodVec2 {.x = 3.0f, .y = 4.0f});
             };
-            if (!vm->InvokeListener(host.listener, pushArgs)) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (auto invokeRes = vm->InvokeListener(host.listener, pushArgs); !ZHLN::Test::ExpectFalse(!invokeRes)) {
+                return std::unexpected(invokeRes.error());
             }
             if (host.observedSum != 30) {
                 return std::unexpected(LuaSuiteFail::WrongValue);
@@ -687,8 +677,8 @@ struct LuaSuite {
             }
 
             // Register an infinite-loop listener and verify InvokeListener enforces maxInstructions.
-            if (!vm->ExecuteString("assert(OnStep(function() while true do end end))")) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (auto execRes2 = vm->ExecuteString("assert(OnStep(function() while true do end end))"); !ZHLN::Test::ExpectFalse(!execRes2)) {
+                return std::unexpected(execRes2.error());
             }
             auto runaway = vm->InvokeListener(host.listener, noArgs, "runaway_cb");
             if (runaway || !(runaway.error() == ZHLN::Lua::Error::InstructionBudgetExceeded)) {
@@ -752,13 +742,13 @@ struct LuaScriptSuite {
             )lua";
 
             auto script = ZHLN::Lua::Compile<LuaScriptState>(kChunk, "stateless.lua").Build();
-            if (!script) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!script)) {
+                return std::unexpected(script.error());
             }
             LuaScriptState state;
             for (int i = 0; i < 3; ++i) {
-                if (auto res = (*script)(state); !res) {
-                    return std::unexpected(LuaSuiteFail::UnexpectedError);
+                if (auto res = (*script)(state); !ZHLN::Test::ExpectFalse(!res)) {
+                    return std::unexpected(res.error());
                 }
                 if (state.value != i + 2 || state.steps != 1 || state.label != "after" || !state.spawn) {
                     return std::unexpected(LuaSuiteFail::WrongValue);
@@ -774,8 +764,8 @@ struct LuaScriptSuite {
             auto readOnly = ZHLN::Lua::Compile<LuaScriptState>(
                 "return function(state) return { speed = 9.0 } end", "readonly.lua"
             ).Build();
-            if (!readOnly) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!readOnly)) {
+                return std::unexpected(readOnly.error());
             }
             LuaScriptState state;
             auto res = (*readOnly)(state);
@@ -789,8 +779,8 @@ struct LuaScriptSuite {
             auto unknown = ZHLN::Lua::Compile<LuaScriptState>(
                 "return function(state) return { value = 5, bogus = 1 } end", "unknown.lua"
             ).Build();
-            if (!unknown) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!unknown)) {
+                return std::unexpected(unknown.error());
             }
             auto unknownRes = (*unknown)(state);
             if (unknownRes || state.value != 1) {
@@ -810,13 +800,13 @@ struct LuaScriptSuite {
                 .Yes(ZHLN::Lua::Permission::GlobalsWrite)
                 .No(ZHLN::Lua::Permission::Print)
                 .Build();
-            if (!script) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!script)) {
+                return std::unexpected(script.error());
             }
             LuaScriptState state;
             for (int i = 0; i < 2; ++i) {
-                if (auto res = (*script)(state); !res) {
-                    return std::unexpected(LuaSuiteFail::UnexpectedError);
+                if (auto res = (*script)(state); !ZHLN::Test::ExpectFalse(!res)) {
+                    return std::unexpected(res.error());
                 }
                 if (state.steps != 1) {
                     return std::unexpected(LuaSuiteFail::WrongValue);
@@ -831,12 +821,12 @@ struct LuaScriptSuite {
             )
                 .Host(ZHLN::Lua::Permission::HostFn<"addOne", &LuaAddOne>)
                 .Build();
-            if (!script) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!script)) {
+                return std::unexpected(script.error());
             }
             LuaScriptState state;
-            if (auto res = (*script)(state); !res) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (auto res = (*script)(state); !ZHLN::Test::ExpectFalse(!res)) {
+                return std::unexpected(res.error());
             }
             if (state.value != 2) {
                 return std::unexpected(LuaSuiteFail::WrongValue);
@@ -860,12 +850,12 @@ struct LuaScriptSuite {
             auto script = ZHLN::Lua::Compile<TaggedScriptState>(
                 "return function(state) return { value = 11, out = { fire = true } } end", "tags.lua"
             ).Build();
-            if (!script) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!script)) {
+                return std::unexpected(script.error());
             }
             TaggedScriptState state;
-            if (auto res = (*script)(state); !res) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (auto res = (*script)(state); !ZHLN::Test::ExpectFalse(!res)) {
+                return std::unexpected(res.error());
             }
             if (state.value != 11 || !state.out.fire) {
                 return std::unexpected(LuaSuiteFail::WrongValue);
@@ -878,8 +868,8 @@ struct LuaScriptSuite {
             auto denied = ZHLN::Lua::Compile<TaggedScriptState>(
                 "return function(state) return { [\"in\"] = { locked = 99 } } end", "tags_ro.lua"
             ).Build();
-            if (!denied) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!denied)) {
+                return std::unexpected(denied.error());
             }
             auto res = (*denied)(state);
             const auto code = res ? std::optional<ZHLN::ErrorCode> {} : std::optional<ZHLN::ErrorCode> {res.error()};
@@ -904,12 +894,12 @@ struct LuaScriptSuite {
                 )lua",
                 "base.lua"
             ).Build();
-            if (!script) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!script)) {
+                return std::unexpected(script.error());
             }
             LuaScriptState state;
-            if (auto res = (*script)(state); !res) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (auto res = (*script)(state); !ZHLN::Test::ExpectFalse(!res)) {
+                return std::unexpected(res.error());
             }
             if (state.steps != 3 || state.label != "number") {
                 return std::unexpected(LuaSuiteFail::WrongValue);
@@ -919,20 +909,22 @@ struct LuaScriptSuite {
 
         auto TestShippedSandboxScript() -> std::expected<void, ZHLN::ErrorCode> {
             const auto path = ZHLN::FS::Paths::FindDataFile("scripts/sandbox.lua");
-            if (!path) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!path)) {
+                // FindDataFile returns std::optional: absence IS the diagnosis --
+                // the shipped script is not where the runtime looks for it.
+                return std::unexpected(ZHLN::Lua::Error::FileReadFailed);
             }
             auto source = ReadHostFileText(*path);
-            if (!source) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!source)) {
+                return std::unexpected(source.error());
             }
             auto script = ZHLN::Lua::Compile<SandboxMirror>(*source, "sandbox.lua").Build();
-            if (!script) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!script)) {
+                return std::unexpected(script.error());
             }
             SandboxMirror state;
-            if (auto res = (*script)(state); !res) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (auto res = (*script)(state); !ZHLN::Test::ExpectFalse(!res)) {
+                return std::unexpected(res.error());
             }
             if (!Near(state.lampPos.x, std::cos(0.9f) * 3.0f) || !Near(state.lampPos.z, std::sin(0.9f) * 3.0f) ||
                 !Near(state.launchSpeed, 12.0f + std::sin(0.25f) * 2.0f) || !state.out.spawnCube || state.out.quit) {
@@ -947,12 +939,12 @@ struct LuaScriptSuite {
             const std::string code = "return function(state) return { value = 11, steps = 1, label = 'bytes' } end";
             const std::span<const std::byte> bytes(reinterpret_cast<const std::byte*>(code.data()), code.size());
             auto script = ZHLN::Lua::Compile<LuaScriptState>(bytes, "bytes.lua").Build();
-            if (!script) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!script)) {
+                return std::unexpected(script.error());
             }
             LuaScriptState state;
-            if (auto res = (*script)(state); !res) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (auto res = (*script)(state); !ZHLN::Test::ExpectFalse(!res)) {
+                return std::unexpected(res.error());
             }
             if (state.value != 11 || state.steps != 1 || state.label != "bytes") {
                 return std::unexpected(LuaSuiteFail::WrongValue);
@@ -962,8 +954,8 @@ struct LuaScriptSuite {
 
         auto TestRejectsBytecodeChunks() -> std::expected<void, ZHLN::ErrorCode> {
             auto vm = ZHLN::Lua::VirtualMachine::Create({});
-            if (!vm) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            if (!ZHLN::Test::ExpectFalse(!vm)) {
+                return std::unexpected(vm.error());
             }
             // LuaJIT accepts unverified bytecode; a leading ESC byte must be
             // rejected before luaL_loadbufferx sees the payload (LuaRocks 2026).

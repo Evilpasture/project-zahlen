@@ -733,7 +733,28 @@ add_custom_target(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CreateSymlinks.cmake"
   COMMENT "Creating zero-copy symlinks for resources...")
 
-add_dependencies(zahlen link_resources)
+# `config/` and `scripts/` are shipped runtime data, not build inputs: the Lua
+# sandbox sample mounts scripts/sandbox.lua through FindDataFile, and
+# config/graphics.lua is the shipped profile the Lua suite evaluates. Neither was
+# ever staged, so every lookup missed in a clean build -- and passed only when the
+# process happened to be started from somewhere the relative probe could reach.
+add_custom_target(
+  link_config ALL
+  COMMAND
+    ${CMAKE_COMMAND} -D SRC="${CMAKE_CURRENT_SOURCE_DIR}/config" -D
+    DST="${CMAKE_BINARY_DIR}/config" -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CreateSymlinks.cmake"
+  COMMENT "Creating zero-copy symlinks for config...")
+
+add_custom_target(
+  link_scripts ALL
+  COMMAND
+    ${CMAKE_COMMAND} -D SRC="${CMAKE_CURRENT_SOURCE_DIR}/scripts" -D
+    DST="${CMAKE_BINARY_DIR}/scripts" -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CreateSymlinks.cmake"
+  COMMENT "Creating zero-copy symlinks for scripts...")
+
+add_dependencies(zahlen link_resources link_config link_scripts)
 
 if(USE_SANITIZERS)
     zahlen_install_sanitizer_runtime(zahlen)

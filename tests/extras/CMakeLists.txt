@@ -41,10 +41,18 @@ function(zahlen_add_extras_group GROUP_TARGET)
     zahlen_wrap_ztest_sources(_wrapped_sources _rel_files ${ARGN})
     add_executable(${GROUP_TARGET} ${_wrapped_sources})
 
+    # Binaries belong in ${CMAKE_BINARY_DIR}/bin, the same place ztest_cpu and
+    # the host tools go. FindDataFile() probes the executable's parent directory
+    # only when the executable itself sits in a directory named "bin" or
+    # "samples" (src/filesystem/RuntimePaths.cpp), so an extras binary left in
+    # tests/extras/ can never reach the data staged in ${CMAKE_BINARY_DIR} --
+    # every FindDataFile("config/...") and ("scripts/...") returns nullopt no
+    # matter what the build stages.
     set_target_properties(${GROUP_TARGET} PROPERTIES
         CXX_STANDARD 26
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
         ZHLN_ZTEST_SOURCE_FILES "${_rel_files}"
     )
 
@@ -55,6 +63,15 @@ function(zahlen_add_extras_group GROUP_TARGET)
     )
 
     zahlen_enable_reflection(${GROUP_TARGET})
+
+    # A targeted `--target ${GROUP_TARGET}` build must still stage the data
+    # directories the suite reads through FindDataFile(); the ALL rules only
+    # cover a full build. Mirrors samples/CMakeLists.txt.
+    foreach(_data_target IN ITEMS link_resources link_config link_scripts)
+        if(TARGET ${_data_target})
+            add_dependencies(${GROUP_TARGET} ${_data_target})
+        endif()
+    endforeach()
 
     if(USE_SANITIZERS)
         target_compile_options(${GROUP_TARGET} PRIVATE
