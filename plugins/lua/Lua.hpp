@@ -10,6 +10,7 @@
 #include <Zahlen/COM/IEngine.hpp>
 #include <lua/Plugin.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IErrorRegistry.hpp>
 #include <Zahlen/COM/ILogger.hpp>
 #include <Zahlen/COM/LoggerView.hpp>
 #include <Zahlen/Core/Description.hpp>
@@ -51,8 +52,68 @@ namespace ZHLN {
 
 namespace Lua {
 
+// --- Field annotations -----------------------------------------------------
+// C++26 field annotations. The underlying C++ type is untouched for
+// ConfigCli/TOML/JSON; only the Lua bridge interprets these tags.
+//
+// Declared before any marshalling template because three separate walks read
+// them: TemplatedDetail::PushValue (nested reflected members),
+// TemplatedDetail::PushState (the top-level state), and
+// TemplatedDetail::StageObject (the patch path). A Hidden member is invisible
+// to Lua in every direction: it is never pushed, and a table that names it is
+// rejected.
+struct ReadOnly {};
+struct Hidden {};
+struct OneShot {};
 
+// The full result of one script evaluation: the code the VM or the patch
+// validator produced, plus the detail reflection cannot supply -- the Lua error
+// string with its line, the field or key that was refused, or the asset path
+// that could not be read. Declared here, before the evaluation entry points,
+// because every one of them returns it -- a failure and its reason are one
+// value, never a value plus a smuggled out-parameter.
+//
+// It substitutes for ErrorCode wherever one is expected, so a caller that only
+// cares which failure happened writes `res.error() == Error::UnknownField` and
+// never touches the detail.
+struct ScriptError {
+    ErrorCode   code {};
+    std::string detail;
 
+    constexpr operator ErrorCode() const noexcept {
+        return code;
+    }
+    template <typename E>
+        requires std::is_enum_v<E>
+    [[nodiscard]] constexpr auto get() const noexcept -> std::optional<E> {
+        return code.get<E>();
+    }
+    [[nodiscard]] constexpr auto CategoryHash() const noexcept -> uint32_t {
+        return code.CategoryHash();
+    }
+    [[nodiscard]] constexpr auto Value() const noexcept -> uint32_t {
+        return code.Value();
+    }
+    friend constexpr auto operator==(const ScriptError& lhs, const ErrorCode& rhs) noexcept -> bool {
+        return lhs.code == rhs;
+    }
+    template <typename E>
+        requires std::is_enum_v<E>
+    friend constexpr auto operator==(const ScriptError& lhs, E rhs) noexcept -> bool {
+        return lhs.code == ErrorCode(rhs);
+    }
+};
+
+// Opt-in detail sink for a caller that wants *why* rather than only *which*.
+// Same bargain as the TOML plugin's ParseWithDiagnostics: the default call
+// returns a bare ErrorCode, and only a caller that asks receives the string.
+// Pass it to the WithDiagnostics overload and read `detail` afterwards.
+struct ScriptDiagnostics {
+    // Field or key the patch validator refused, or the Lua error string with
+    // the chunk name and line for a VM-level fault. Empty when the failure is
+    // fully described by its ErrorCode.
+    std::string detail;
+};
 
 // Opt-in trait for aggregate coordinate/color structs (e.g. JPH::Float2/3/4)
 // so Lua authors can write either `{ 1.0, 2.0, 3.0 }` or `{ x = 1.0, y = 2.0, z = 3.0 }`.
@@ -725,7 +786,9 @@ auto PatchObject(T& target, Value table, std::string* detail) -> std::expected<v
         if (!res) {
             err = res.error();
             if (detail != nullptr) {
-                *detail = fieldDetail.empty() ? std::format("field '{}': {}", fieldName, res.error()) : std::format("field '{}': {}", fieldName, fieldDetail);
+                // No trailing separator when the inner walk had nothing to add:
+                // "field 'speed'" reads; "field 'speed': " does not.
+                *detail = fieldDetail.empty() ? std::format("field '{}'", fieldName) : std::format("field '{}': {}", fieldName, fieldDetail);
             }
         }
     });
@@ -801,9 +864,15 @@ void PushValue(Builder& builder, const T& value) {
             builder.SetElementTop(idx++);
         }
     } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
-        constexpr size_t kFields = ZHLN::Reflect::FieldCount<Decayed>();
-        builder.BeginTable(0, static_cast<int>(kFields));
-        ZHLN::Reflect::ForEachFieldWithName(value, [&](std::string_view fieldName, const auto& fieldVal) -> void {
+        // A nested reflected struct is walked member by member, so it honours
+        // the same field annotations as PushState: a Hidden member is not
+        // marshalled, and a reference member (an ECS handle, a borrowed
+        // object) has no value to copy out, so it is skipped too.
+        builder.BeginTable(0, static_cast<int>(ZHLN::Reflect::FieldCount<Decayed>()));
+        ZHLN::Reflect::ForEachDataMemberWithMeta(value, [&]<auto member, typename MemberType>(std::string_view fieldName, const auto& fieldVal) -> void {
+            if constexpr (ZHLN::Reflect::HasAnnotation<Hidden, member>() || std::is_reference_v<MemberType>) {
+                return;
+            }
             PushValue(builder, fieldVal);
             builder.SetFieldTop(fieldName);
         });
@@ -842,10 +911,12 @@ auto ReadHostArg(const CallFrame& frame, int oneBased) -> T {
                   "ZHLN::Lua: HostFn arguments must be values (no pointers, IEngine*, or references).");
     static_assert(std::is_default_constructible_v<Clean>,
                   "ZHLN::Lua: HostFn arguments must be default-constructible value types.");
-    Clean            out {};
-    std::string      detail;
-    auto             res = ReadInto(out, HostAccessBridge::ArgValue(frame, oneBased), &detail);
+    Clean       out {};
+    std::string detail;
+    auto        res = ReadInto(out, HostAccessBridge::ArgValue(frame, oneBased), &detail);
     if (!res) {
+        // The code alone would leave the Lua author guessing which argument;
+        // `detail` says which field of it was refused.
         HostAccessBridge::RaiseError(frame, detail.empty() ? "host function argument conversion failed" : detail);
     }
     return out;
@@ -884,81 +955,131 @@ auto HostFnThunk(CallFrame& frame) -> int {
 // ----------------------------------------------------------------------------
 // Public Monadic Evaluation & Transactional Patching API
 // ----------------------------------------------------------------------------
+//
+// Two levels, matching the TOML plugin's Parse / ParseWithDiagnostics split:
+//
+//   * the default call returns a bare ErrorCode -- 8 bytes, no allocation, and
+//     ErrorCode's own description already names the failure;
+//   * the *WithDiagnostics overload additionally reports the three things an
+//     enum annotation cannot express at compile time:
+//       1. the Lua error string with chunk and line for a VM fault,
+//       2. which field, key, or enum token the patch validator refused,
+//       3. the asset path that could not be read.
+//     Anything else leaves the detail empty and lets the code speak for itself.
+//
+// Nothing here takes an out-parameter: the plain form's return type is the
+// whole answer, and the diagnostics form carries its reason in the value.
 
-template <typename T>
-[[nodiscard]] auto
-    ApplyPatchString(T& target, std::string_view chunk, std::string_view chunkName = "patch", Budget budget = {}, std::string* outDetail = nullptr)
-        -> std::expected<void, ErrorCode> {
-    auto vm = VirtualMachine::Create(budget);
-    if (!vm) {
-        return std::unexpected(vm.error());
-    }
-
-    struct PatchCtx {
-        T*           targetPtr;
-        std::string* detail;
-    } ctx {&target, outDetail};
-
-    auto res = vm->EvaluateTop(chunk, chunkName, &ctx, [](const void* rawCtx, Value root) -> std::expected<void, ErrorCode> {
-        const auto* c = static_cast<const PatchCtx*>(rawCtx);
-        return TemplatedDetail::PatchField(*c->targetPtr, root, c->detail);
-    });
-    if (!res && outDetail != nullptr && outDetail->empty()) {
-        // Chunk-level failures (syntax/runtime/budget) are recorded by the
-        // VirtualMachine itself; surface them through the same detail channel.
-        *outDetail = std::string(vm->LastErrorDetail());
-    }
-    return res;
+// A patch rejection reports the offending field through the detail; a
+// chunk-level fault (syntax, runtime, budget) leaves it empty and the VM's own
+// last-error is what carries where and why. One place decides between the two,
+// so every entry point below reports the same way.
+[[nodiscard]] inline auto DetailOrVm(const std::string& detail, const VirtualMachine& vm) -> std::string {
+    return detail.empty() ? std::string(vm.LastErrorDetail()) : detail;
 }
 
 template <typename T>
-[[nodiscard]] auto EvaluateString(std::string_view chunk, std::string_view chunkName = "chunk", Budget budget = {}, std::string* outDetail = nullptr)
-    -> std::expected<T, ErrorCode> {
+[[nodiscard]] auto ApplyPatchStringWithDiagnostics(
+    T& target, std::string_view chunk, std::string_view chunkName = "patch", Budget budget = {}
+) -> std::expected<void, ScriptError> {
+    auto vm = VirtualMachine::Create(budget);
+    if (!vm) {
+        return std::unexpected(ScriptError {.code = vm.error()});
+    }
+
+    struct PatchCtx {
+        T* targetPtr;
+        // The why, once the callback has run: the callback's own signature
+        // cannot return it (EvaluateTop takes a fixed void-expecting function
+        // pointer), so it parks the reason here for the caller right below.
+        std::string detail;
+    } ctx {&target};
+
+    auto res = vm->EvaluateTop(chunk, chunkName, &ctx, [](const void* rawCtx, Value root) -> std::expected<void, ErrorCode> {
+        auto* c       = static_cast<PatchCtx*>(const_cast<void*>(rawCtx));
+        auto  patched = TemplatedDetail::PatchField(*c->targetPtr, root, &c->detail);
+        if (!patched) {
+            return std::unexpected(patched.error());
+        }
+        return {};
+    });
+    if (!res) {
+        return std::unexpected(ScriptError {.code = res.error(), .detail = DetailOrVm(ctx.detail, *vm)});
+    }
+    return {};
+}
+
+// Evaluates `chunk`, which must return a table, and patches `target` with it
+// transactionally: a refused field leaves the target untouched.
+template <typename T>
+[[nodiscard]] auto ApplyPatchString(T& target, std::string_view chunk, std::string_view chunkName = "patch", Budget budget = {})
+    -> std::expected<void, ErrorCode> {
+    auto patched = ApplyPatchStringWithDiagnostics(target, chunk, chunkName, budget);
+    if (!patched) {
+        return std::unexpected(patched.error().code);
+    }
+    return {};
+}
+
+template <typename T>
+[[nodiscard]] auto EvaluateStringWithDiagnostics(std::string_view chunk, std::string_view chunkName = "chunk", Budget budget = {})
+    -> std::expected<T, ScriptError> {
     T out {};
     if constexpr (TemplatedDetail::VectorLike<std::remove_cvref_t<T>> && ValueTrait<std::remove_cvref_t<T>>::specialized) {
         // A value conversion constructs a vector according to its trait;
         // unlike patching, it must not treat a short sequence as an update.
         auto vm = VirtualMachine::Create(budget);
-        if (!vm)
-            return std::unexpected(vm.error());
+        if (!vm) {
+            return std::unexpected(ScriptError {.code = vm.error()});
+        }
         struct ValueCtx {
-            T*           target;
-            std::string* detail;
-        } ctx {&out, outDetail};
+            T*          target;
+            std::string detail;
+        } ctx {&out};
         auto res = vm->EvaluateTop(chunk, chunkName, &ctx, [](const void* rawCtx, Value root) -> std::expected<void, ErrorCode> {
-            const auto* c = static_cast<const ValueCtx*>(rawCtx);
-            return TemplatedDetail::ReadInto(*c->target, root, c->detail);
+            auto* c    = static_cast<ValueCtx*>(const_cast<void*>(rawCtx));
+            auto  read = TemplatedDetail::ReadInto(*c->target, root, &c->detail);
+            if (!read) {
+                return std::unexpected(read.error());
+            }
+            return {};
         });
         if (!res) {
-            if (outDetail != nullptr && outDetail->empty()) {
-                *outDetail = std::string(vm->LastErrorDetail());
-            }
-            return std::unexpected(res.error());
+            return std::unexpected(ScriptError {.code = res.error(), .detail = DetailOrVm(ctx.detail, *vm)});
         }
-    } else if (auto res = ApplyPatchString(out, chunk, chunkName, budget, outDetail); !res) {
+    } else if (auto res = ApplyPatchStringWithDiagnostics(out, chunk, chunkName, budget); !res) {
         return std::unexpected(res.error());
     }
     return out;
 }
 
-// Evaluates a pure Lua function `return function(arg1, arg2, ...) -> table`
-// and patches `target` transactionally with its returned table.
+template <typename T>
+[[nodiscard]] auto EvaluateString(std::string_view chunk, std::string_view chunkName = "chunk", Budget budget = {}) -> std::expected<T, ErrorCode> {
+    auto evaluated = EvaluateStringWithDiagnostics<T>(chunk, chunkName, budget);
+    if (!evaluated) {
+        return std::unexpected(evaluated.error().code);
+    }
+    return std::move(*evaluated);
+}
+
 template <typename T, typename... InArgs>
-[[nodiscard]] auto ApplyCallPatchString(T& target, std::string_view chunk, std::string_view chunkName, Budget budget, const InArgs&... inputs)
-    -> std::expected<void, ErrorCode> {
+[[nodiscard]] auto ApplyCallPatchStringWithDiagnostics(
+    T& target, std::string_view chunk, std::string_view chunkName, Budget budget, const InArgs&... inputs
+) -> std::expected<void, ScriptError> {
     auto vm = VirtualMachine::Create(budget);
     if (!vm) {
-        return std::unexpected(vm.error());
+        return std::unexpected(ScriptError {.code = vm.error()});
     }
 
     using TupleT = std::tuple<const InArgs&...>;
     TupleT argsTuple {inputs...};
 
     struct PatchCtx {
-        T* targetPtr;
+        T*          targetPtr;
+        std::string detail;
     } patchCtx {&target};
 
-    return vm->EvaluateCallTop(
+    auto res = vm->EvaluateCallTop(
         chunk, chunkName, &argsTuple,
         [](const void* rawArgs, Builder& builder) -> int {
             const auto& tup = *static_cast<const TupleT*>(rawArgs);
@@ -967,32 +1088,57 @@ template <typename T, typename... InArgs>
         },
         &patchCtx,
         [](const void* rawCtx, Value result) -> std::expected<void, ErrorCode> {
-            const auto* c = static_cast<const PatchCtx*>(rawCtx);
-            return TemplatedDetail::ReadInto(*c->targetPtr, result);
+            auto* c    = static_cast<PatchCtx*>(const_cast<void*>(rawCtx));
+            auto  read = TemplatedDetail::ReadInto(*c->targetPtr, result, &c->detail);
+            if (!read) {
+                return std::unexpected(read.error());
+            }
+            return {};
         }
     );
+    if (!res) {
+        return std::unexpected(ScriptError {.code = res.error(), .detail = DetailOrVm(patchCtx.detail, *vm)});
+    }
+    return {};
+}
+
+// Evaluates a pure Lua function `return function(arg1, arg2, ...) -> table`
+// and patches `target` transactionally with its returned table.
+template <typename T, typename... InArgs>
+[[nodiscard]] auto ApplyCallPatchString(T& target, std::string_view chunk, std::string_view chunkName, Budget budget, const InArgs&... inputs)
+    -> std::expected<void, ErrorCode> {
+    auto patched = ApplyCallPatchStringWithDiagnostics(target, chunk, chunkName, budget, inputs...);
+    if (!patched) {
+        return std::unexpected(patched.error().code);
+    }
+    return {};
 }
 
 template <typename OutT, typename... InArgs>
-[[nodiscard]] auto
-    EvaluateCallString(std::string_view chunk, std::string_view chunkName, Budget budget, const InArgs&... inputs) -> std::expected<OutT, ErrorCode> {
+[[nodiscard]] auto EvaluateCallStringWithDiagnostics(
+    std::string_view chunk, std::string_view chunkName, Budget budget, const InArgs&... inputs
+) -> std::expected<OutT, ScriptError> {
     OutT out {};
-    if (auto res = ApplyCallPatchString(out, chunk, chunkName, budget, inputs...); !res) {
+    if (auto res = ApplyCallPatchStringWithDiagnostics(out, chunk, chunkName, budget, inputs...); !res) {
         return std::unexpected(res.error());
     }
     return out;
+}
+
+template <typename OutT, typename... InArgs>
+[[nodiscard]] auto EvaluateCallString(std::string_view chunk, std::string_view chunkName, Budget budget, const InArgs&... inputs)
+    -> std::expected<OutT, ErrorCode> {
+    auto evaluated = EvaluateCallStringWithDiagnostics<OutT>(chunk, chunkName, budget, inputs...);
+    if (!evaluated) {
+        return std::unexpected(evaluated.error().code);
+    }
+    return std::move(*evaluated);
 }
 
 enum class ErrorPolicy : uint8_t {
     Fail,       // propagate std::unexpected(Error) to ZHLN::App
     LogAndSkip, // log, leave state unchanged, keep running
 };
-
-// C++26 field annotations. The underlying C++ type is untouched for
-// ConfigCli/TOML/JSON; only the Lua bridge interprets these tags.
-struct ReadOnly {};
-struct Hidden {};
-struct OneShot {};
 
 // --- Permissions -----------------------------------------------------------
 
@@ -1152,51 +1298,147 @@ struct HostRegistrar<TypeList<Tags...>> {
 } // namespace Permission
 
 // --- Runtime ---------------------------------------------------------------
+//
+// The script boundary is split in two on purpose:
+//
+//   * A *state* is a plain reflected aggregate. It is the only thing Lua can
+//     read or write, and it holds nothing but data, so a layer that needs no
+//     C++ behaviour is just `.State(state)`.
+//   * A *host* is a `Runtime<StateT>` subclass that owns the C++ half of a
+//     scripted feature: scene mutations, input sampling, engine calls. The
+//     layer drives it with qualified calls (`host.HostT::OnPrepare(...)`, never
+//     through a `Runtime&`), so a final host devirtualizes even in an
+//     unoptimized build, while the virtual declarations stay the single
+//     documented contract a host implements.
+//
+// Everything a host can learn about a failure arrives through `Failure`:
+// which phase failed, the code, and the human detail the Lua VM or the patch
+// validator produced. The layer is the only thing that interprets an
+// `ErrorPolicy`; the host just observes.
 
 template <typename Policy = Permission::DefaultPolicy>
 class LayerBuilder;
 
-template <typename T, typename Policy>
+template <typename StateT, typename HostT = void, typename Policy = Permission::DefaultPolicy>
 class Layer;
 template <typename T, typename Policy>
 class ScriptBuilder;
 template <typename T>
 class Script;
 
+// The phase a failure was raised in. Deliberately the union of the lifecycle
+// hooks and the frame hooks rather than one enum per side: a host that wants
+// to react to errors gets one value to switch on.
+enum class Phase : uint8_t {
+    Start,
+    Tick,
+    BeforeRender,
+    AfterTick,
+    HotReload,
+};
+
+[[nodiscard]] constexpr auto PhaseName(Phase phase) noexcept -> std::string_view {
+    switch (phase) {
+        case Phase::Start:
+            return "Start";
+        case Phase::Tick:
+            return "Tick";
+        case Phase::BeforeRender:
+            return "BeforeRender";
+        case Phase::AfterTick:
+            return "AfterTick";
+        case Phase::HotReload:
+            return "HotReload";
+    }
+    return "Unknown";
+}
+
+// What a host is handed when a phase fails, and what the layer logs before it
+// applies an ErrorPolicy. `message` is the code's own rendering ("Expected a
+// Lua table value"); `detail` says where and why (the Lua error string with the
+// chunk and line, or the offending field). Both borrow the storage of the call
+// that failed and are valid only for the duration of the OnError call -- a host
+// that keeps them must copy.
+struct Failure {
+    Phase     phase {};
+    ErrorCode code {};
+    // Only what the code cannot say: the Lua line a VM fault came from, or the
+    // field that was refused. Empty otherwise. There is deliberately no
+    // `message` member -- std::formatter<ErrorCode> already renders the
+    // category, name, and enum description, and copying that into a second
+    // string made Describe() print the description twice.
+    std::string_view detail;
+
+    // "Tick: [Lua] Category::Name: <enum description>: unknown field 'bogus'",
+    // or without the trailing part when the code speaks for itself. A log
+    // reader who greps the enumerator still finds the line, and a host that
+    // prints only Describe() still reports everything App::ExitStatus would.
+    [[nodiscard]] auto Describe() const -> std::string {
+        if (detail.empty()) {
+            return std::format("{}: {}", PhaseName(phase), code);
+        }
+        return std::format("{}: {}: {}", PhaseName(phase), code, detail);
+    }
+};
+
+template <typename StateT>
 class Runtime {
   public:
-    struct ErrorDetail {
-        Error       code {};
-        std::string message;
-    };
+    using StateType = StateT;
 
-    [[nodiscard]] auto LastError() const noexcept -> const std::optional<ErrorDetail>& {
-        return _lastError;
+    // Called once when the layer starts and the script has loaded. Reaching
+    // here means the startup Lua patch (if any) already landed, so `state` is
+    // what the script authored: the one place a host may read it before the
+    // first frame. Mutable, so a host can seed what the script left unset.
+    virtual void OnStart(COM::IEngine& engine, StateT& state) {
+        (void) engine;
+        (void) state;
+    }
+    // Called at the frame boundary, before the chunk runs, with the frame delta
+    // the phase was driven with. This is the only place a host may write the
+    // state the script is about to read (sampled input, elapsed time).
+    virtual void OnPrepare(COM::IEngine& engine, StateT& state, float dt) {
+        (void) engine;
+        (void) state;
+        (void) dt;
+    }
+    // Runs at the FRAME BOUNDARY only -- exactly one phase per frame, the first
+    // granted of Tick, BeforeRender, AfterTick -- after that phase's patch has
+    // been committed. A layer that grants several frame phases still gets one
+    // OnCommit per frame, from the boundary phase; the others only evaluate.
+    // That asymmetry is deliberate: one-shot intents are reset once per frame
+    // at the boundary, so a non-boundary phase that wrote them is overwritten by
+    // the next frame's reset, and OnCommit is where a host drains them.
+    // `state` is const: a host acts on the decision the script made rather than
+    // rewriting it before anyone else sees it.
+    virtual void OnCommit(COM::IEngine& engine, const StateT& state) {
+        (void) engine;
+        (void) state;
+    }
+    // Runs when the layer stops, if and only if OnStart ran. It is NOT the
+    // mirror of a failed Start: under ErrorPolicy::LogAndSkip a broken script
+    // starts "successfully" with no chunk, so OnStart runs and OnStop will too,
+    // and a host must therefore create its world in OnStart rather than lazily
+    // on the first frame.
+    virtual void OnStop(COM::IEngine& engine) {
+        (void) engine;
+    }
+    // Called for every failure, including the ones ErrorPolicy::LogAndSkip
+    // swallows. Never called with a stale Failure: the layer passes what the
+    // failing phase produced.
+    virtual void OnError(COM::IEngine& engine, const Failure& failure) {
+        (void) engine;
+        (void) failure;
     }
 
   protected:
     Runtime() noexcept  = default;
     ~Runtime() noexcept = default;
 
-    Runtime(const Runtime&)                    = delete;
-    auto operator=(const Runtime&) -> Runtime& = delete;
-    Runtime(Runtime&&) noexcept                = default;
+    Runtime(const Runtime&)                        = delete;
+    auto operator=(const Runtime&) -> Runtime&     = delete;
+    Runtime(Runtime&&) noexcept                    = default;
     auto operator=(Runtime&&) noexcept -> Runtime& = default;
-
-  private:
-    template <typename, typename>
-    friend class Layer;
-    template <typename>
-    friend class LayerBuilder;
-
-    void SetLastError(Error code, std::string message) {
-        _lastError = ErrorDetail {.code = code, .message = std::move(message)};
-    }
-    void ClearLastError() noexcept {
-        _lastError.reset();
-    }
-
-    std::optional<ErrorDetail> _lastError;
 };
 
 // --- Reflected state marshalling and transactional patching ----------------
@@ -1223,7 +1465,10 @@ void PushState(const T& state, Builder& builder) {
     using Clean = std::remove_cvref_t<T>;
     builder.BeginTable(0, static_cast<int>(ZHLN::Reflect::FieldCount<Clean>()));
     ZHLN::Reflect::ForEachDataMemberWithMeta(state, [&]<auto member, typename MemberType>(std::string_view name, const auto& value) -> void {
-        if constexpr (ZHLN::Reflect::HasAnnotation<Hidden, member>()) {
+        // Hidden and reference members are invisible to Lua. StageObject
+        // already refuses both on the way back in, so pushing them would only
+        // invite a round trip that cannot succeed.
+        if constexpr (ZHLN::Reflect::HasAnnotation<Hidden, member>() || std::is_reference_v<MemberType>) {
             return;
         }
         TemplatedDetail::PushValue(builder, value);
@@ -1293,8 +1538,14 @@ auto StageObject(T& target, Value table, const PatchOptions& options, std::strin
         // never be written, including non-copyable handles annotated Hidden.
         if constexpr (kHidden || kReference) {
             err = kHidden ? Error::UnknownField : Error::ReadOnlyField;
+            if (detail != nullptr) {
+                *detail = kHidden ? std::format("unknown field '{}'", name) : std::format("field '{}' is not writable", name);
+            }
         } else if constexpr (kReadOnly) {
             err = Error::ReadOnlyField;
+            if (detail != nullptr) {
+                *detail = std::format("field '{}' is read-only", name);
+            }
         } else {
             using Field = std::remove_reference_t<decltype(field)>;
             FieldContext ctx {
@@ -1312,6 +1563,14 @@ auto StageObject(T& target, Value table, const PatchOptions& options, std::strin
             auto res = table.WithKey(name, &ctx, &Visitor::Apply);
             if (!res) {
                 err = res.error().template get<Error>().value_or(Error::RuntimeError);
+                // Name the field here, or a nested failure loses which member it
+                // came from: the inner walk writes its own reason into `detail`
+                // but not the outer name, so "field 'out': field 'speed'" would
+                // arrive as "field 'speed'" and the host could not place it.
+                if (detail != nullptr) {
+                    const auto inner = std::string_view(*detail);
+                    *detail = inner.empty() ? std::format("field '{}'", name) : std::format("field '{}': {}", name, inner);
+                }
             }
         }
     });
@@ -1365,19 +1624,42 @@ auto PatchState(T& target, Value value, const PatchOptions& options, std::string
 } // namespace TemplatedDetail
 
 // --- Script ----------------------------------------------------------------
+//
+// A compiled, stateless reducer. The chunk is parsed once; every call gets a
+// fresh environment and produces a table that is patched transactionally into
+// the caller's state. Nothing about the outcome is cached on the Script: a
+// failure comes back as `ScriptError { code, detail }`, so two Scripts (or two
+// threads) never read each other's last error.
 
 template <typename T>
 class Script {
   public:
     Script() noexcept = default;
 
+    // A failure carries the code and the reason together: the Lua error string
+    // for a syntax/runtime/budget fault, already naming the chunk and line. No
+    // out-parameter -- the return type was the place to put it.
     template <typename Policy = Permission::DefaultPolicy>
-    [[nodiscard]] static auto Compile(
-        std::string_view code,
-        std::string_view name,
-        Budget           budget = {},
-        Policy           policy = {}
-    ) noexcept -> std::expected<Script, ErrorCode> {
+    // Compiles the chunk with the policy's permissions and host functions.
+    // The plain form reports the code alone: the ErrorCode's own description
+    // already says what went wrong, and a caller that only branches on it
+    // should not pay for a std::string it never reads.
+    [[nodiscard]] static auto Compile(std::string_view code, std::string_view name, Budget budget = {}, Policy policy = {}) noexcept
+        -> std::expected<Script, ErrorCode> {
+        auto built = CompileWithDiagnostics(code, name, budget, policy);
+        if (!built) {
+            return std::unexpected(built.error().code);
+        }
+        return std::move(*built);
+    }
+
+    // Same compile, but the failure carries what reflection cannot supply: the
+    // Lua error string with the chunk name and line a syntax or runtime fault
+    // happened on. Mirrors Document::Parse / ParseWithDiagnostics in the TOML
+    // plugin -- diagnostics are opt-in, never the default price.
+    template <typename Policy = Permission::DefaultPolicy>
+    [[nodiscard]] static auto CompileWithDiagnostics(std::string_view code, std::string_view name, Budget budget = {}, Policy policy = {})
+        -> std::expected<Script, ScriptError> {
         (void) policy;
         Script result;
         result._allowUnknownFields = (Policy::yes & static_cast<uint64_t>(Permission::Bit::UnknownFields)) != 0u;
@@ -1388,33 +1670,53 @@ class Script {
         };
         auto vm = VirtualMachine::Create(coreBudget);
         if (!vm) {
-            return std::unexpected(vm.error());
+            return std::unexpected(ScriptError {.code = vm.error()});
         }
+        // Every remaining failure comes out of the VM itself, so the VM's own
+        // last-error is the detail -- it is what names the chunk and the line.
+        auto fail = [&vm](ErrorCode errorCode) -> std::expected<Script, ScriptError> {
+            return std::unexpected(ScriptError {.code = errorCode, .detail = std::string(vm->LastErrorDetail())});
+        };
         if (auto perms = vm->ApplyScriptPermissions(Policy::yes); !perms) {
-            return std::unexpected(perms.error());
+            return fail(perms.error());
         }
         if constexpr (!std::same_as<typename Policy::HostFns, Permission::TypeList<>>) {
             if (auto registered = Permission::HostRegistrar<typename Policy::HostFns>::Register(*vm); !registered) {
-                return std::unexpected(registered.error());
+                return fail(registered.error());
             }
         }
         if (auto compiled = vm->CompileChunk(code, name); !compiled) {
-            return std::unexpected(compiled.error());
+            return fail(compiled.error());
         }
         result._vm   = std::move(*vm);
         result._name = std::string(name);
         return result;
     }
 
+    // Runs the chunk against `state`. The plain form reports the code alone;
+    // the WithDiagnostics form additionally names the field or key that was
+    // refused, or the Lua line a chunk-level fault came from.
     [[nodiscard]] auto operator()(T& state) noexcept -> std::expected<void, ErrorCode> {
-        if (!_vm.IsValid() || !_vm.HasCompiledChunk()) {
-            return std::unexpected(Error::ScriptLoadFailed);
+        auto diagnostics = ScriptDiagnostics {};
+        auto applied     = operator()(state, diagnostics);
+        if (!applied) {
+            return std::unexpected(applied.error().code);
         }
+        return {};
+    }
+
+    [[nodiscard]] auto operator()(T& state, ScriptDiagnostics& diagnostics) noexcept -> std::expected<void, ScriptError> {
+        if (!_vm.IsValid() || !_vm.HasCompiledChunk()) {
+            return std::unexpected(ScriptError {.code = Error::ScriptLoadFailed});
+        }
+        // The patch validator's reason lives in this call's context, not on the
+        // Script: one call's failure cannot be read back by the next one, and a
+        // stateless reducer stays stateless.
         struct CallContext {
-            T*           state              = nullptr;
-            std::string* detail             = nullptr;
-            bool         allowUnknownFields = false;
-        } ctx {&state, &_lastDetail, _allowUnknownFields};
+            T*          state = nullptr;
+            std::string detail;
+            bool        allowUnknownFields = false;
+        } ctx {&state, {}, _allowUnknownFields};
 
         struct Invoker {
             static auto Push(const void* rawCtx, Builder& builder) -> int {
@@ -1422,42 +1724,42 @@ class Script {
                 TemplatedDetail::PushState(*c->state, builder);
                 return 1;
             }
+            // The callback array is typed on ErrorCode, so the reason is parked
+            // in the context and read back by the one caller right below.
             static auto Consume(const void* rawCtx, Value result) -> std::expected<void, ErrorCode> {
-                const auto* c = static_cast<const CallContext*>(rawCtx);
-                return TemplatedDetail::PatchState(
+                auto* c       = static_cast<CallContext*>(const_cast<void*>(rawCtx));
+                auto  patched = TemplatedDetail::PatchState(
                     *c->state, result,
                     TemplatedDetail::PatchOptions {
                         .allowUnknownFields = c->allowUnknownFields,
                     },
-                    c->detail
+                    &c->detail
                 );
+                if (!patched) {
+                    return std::unexpected(patched.error());
+                }
+                return {};
             }
         };
 
-        _lastDetail.clear();
         auto res = _vm.EvaluateCompiledCallTop(&ctx, &Invoker::Push, &ctx, &Invoker::Consume, _name);
         if (!res) {
-            _lastError = res.error().template get<Error>();
+            // A chunk-level fault (syntax, runtime, budget) leaves the patch
+            // reason empty, and the VM's own last-error carries where and why.
+            diagnostics.detail = DetailOrVm(ctx.detail, _vm);
+            return std::unexpected(ScriptError {.code = res.error(), .detail = diagnostics.detail});
         }
-        return res;
+        return {};
     }
 
-    [[nodiscard]] auto LastError() const noexcept -> std::optional<Error> {
-        return _lastError;
-    }
-    [[nodiscard]] auto LastDetail() const noexcept -> std::string_view {
-        return _lastDetail;
-    }
     [[nodiscard]] auto Machine() noexcept -> VirtualMachine& {
         return _vm;
     }
 
   private:
-    VirtualMachine       _vm;
-    std::string          _name;
-    std::string          _lastDetail;
-    std::optional<Error> _lastError;
-    bool                 _allowUnknownFields = false;
+    VirtualMachine _vm;
+    std::string    _name;
+    bool           _allowUnknownFields = false;
 
     template <typename, typename>
     friend class ScriptBuilder;
@@ -1496,8 +1798,14 @@ class ScriptBuilder {
         return copy;
     }
 
+    // Code only; see Script::CompileWithDiagnostics for the form that also
+    // carries the Lua line or the refused field.
     [[nodiscard]] auto Build() const noexcept -> std::expected<Script<T>, ErrorCode> {
         return Script<T>::template Compile<Policy>(_code, _name, _budget);
+    }
+
+    [[nodiscard]] auto BuildWithDiagnostics() const -> std::expected<Script<T>, ScriptError> {
+        return Script<T>::template CompileWithDiagnostics<Policy>(_code, _name, _budget);
     }
 
   private:
@@ -1526,6 +1834,13 @@ template <typename T, typename Bytes>
 // Script sources enter Lua through exactly two doors: FromAsset reads text
 // through the engine VFS (COM::IAssetLibrary), and FromString takes in-memory
 // characters or bytes. There is deliberately no OS-filesystem open path.
+//
+// Two terminals, one per shape of script:
+//   .State(state)      -- pure data. The layer borrows `state`, Lua is the only
+//                         writer, and there is no C++ half at all.
+//   .Bind<Host>(args)  -- a Runtime<StateT> host plus the state it owns. The
+//                         host sees every frame and is told about every
+//                         failure through OnError.
 template <typename Policy>
 class LayerBuilder {
   public:
@@ -1571,19 +1886,32 @@ class LayerBuilder {
     }
 
     [[nodiscard]] auto Budget(Lua::Budget value) const noexcept -> LayerBuilder {
-        auto copy = *this;
+        auto copy    = *this;
         copy._budget = value;
         return copy;
     }
     [[nodiscard]] auto OnError(ErrorPolicy policy) const noexcept -> LayerBuilder {
-        auto copy = *this;
+        auto copy         = *this;
         copy._errorPolicy = policy;
         return copy;
     }
 
-    template <typename T>
-    [[nodiscard]] auto State(T& state) const noexcept -> Layer<T, Policy> {
-        return Layer<T, Policy>(*this, state);
+    // Pure-data terminal: the layer borrows `state` for its whole life and
+    // never grows a C++ half.
+    template <typename StateT>
+    [[nodiscard]] auto State(StateT& state) const noexcept -> Layer<StateT, void, Policy> {
+        return Layer<StateT, void, Policy>(*this, state);
+    }
+
+    // Hosted terminal: the layer owns both HostT::StateType and the host,
+    // constructing the host from `args`. The host is the only C++ the script
+    // can steer, and it always derives from Runtime<StateT>.
+    template <typename HostT, typename... Args>
+    [[nodiscard]] auto Bind(Args&&... args) const -> Layer<typename HostT::StateType, HostT, Policy> {
+        using StateT = typename HostT::StateType;
+        static_assert(std::derived_from<HostT, Runtime<StateT>>, "ZHLN::Lua: Bind<HostT> requires HostT to derive from Lua::Runtime<StateT>.");
+        static_assert(std::is_final_v<HostT>, "ZHLN::Lua: Bind<HostT> requires a final host, so the layer's qualified hook calls bind statically.");
+        return Layer<StateT, HostT, Policy>(*this, std::forward<Args>(args)...);
     }
 
   private:
@@ -1599,138 +1927,326 @@ class LayerBuilder {
         return next;
     }
 
-    std::string  _source;
-    std::string  _name;
-    bool                     _fromAsset   = false;
+    std::string              _source;
+    std::string              _name;
+    bool                     _fromAsset = false;
     std::optional<ErrorCode> _loadError;
     Lua::Budget              _budget {};
     ErrorPolicy              _errorPolicy = ErrorPolicy::Fail;
 
-    template <typename, typename>
+    // Clone<NextPolicy> fills in a builder of a different policy type, so the
+    // friendship has to cover the whole template rather than one specialisation.
+    template <typename>
+    friend class LayerBuilder;
+    template <typename, typename, typename>
     friend class Layer;
 };
 
-template <typename T, typename Policy = Permission::DefaultPolicy>
+namespace TemplatedDetail {
+
+// Tag for Layer's private "move the storage of a same-shape layer into a layer
+// of a different policy type" constructor. Namespace scope, not nested in
+// Layer: the source and destination are different specialisations, so a nested
+// tag would be a different type at each end.
+struct RebindTag {};
+
+// Stand-in for the host of a pure-data layer. BoundStorage is spelled once, at
+// namespace scope and independent of the permission policy, so a layer can move
+// its storage into a layer of a different policy type without the storage type
+// changing under it. A void-host layer never allocates one; the empty stand-in
+// only keeps the member well-formed.
+struct NoHost {};
+
+template <typename StateT, typename HostT>
+struct BoundStorage {
+    using StoredHost = std::conditional_t<std::is_void_v<HostT>, NoHost, HostT>;
+
+    StateT     state {};
+    StoredHost host;
+
+    template <typename... Args>
+    explicit BoundStorage(Args&&... args): state {}, host(std::forward<Args>(args)...) {
+    }
+};
+
+} // namespace TemplatedDetail
+
+// The layer is the only place that interprets an ErrorPolicy. Everything a
+// host can observe about a failure arrives as a `Failure`, and the failure is
+// always recorded in the engine's IErrorRegistry with its full detail, so a
+// caller that never sees the returned ErrorCode can still read why.
+template <typename StateT, typename HostT, typename Policy>
 class Layer {
   public:
-    Layer(const LayerBuilder<Policy>& builder, T& state):
-        _source(builder._source), _name(builder._name), _fromAsset(builder._fromAsset), _loadError(builder._loadError),
-        _budget(builder._budget), _errorPolicy(builder._errorPolicy), _state(&state) {
+    // Borrowed-state layer: HostT is `void`, Lua is the only writer, and the
+    // layer never outlives `state`.
+    Layer(const LayerBuilder<Policy>& builder, StateT& state)
+        requires std::is_void_v<HostT>
+        :
+        _source(builder._source), _name(builder._name), _fromAsset(builder._fromAsset), _loadError(builder._loadError), _budget(builder._budget),
+        _errorPolicy(builder._errorPolicy), _state(&state) {
     }
 
-    [[nodiscard]] auto StatePtr() noexcept -> T* {
+    // Hosted layer: owns the state and the host, constructs the host from
+    // `args`. Only reachable through LayerBuilder::Bind, which enforces that
+    // HostT is a final Runtime<StateT>.
+    template <typename... Args>
+        requires(!std::is_void_v<HostT> && std::constructible_from<HostT, Args...>)
+    Layer(const LayerBuilder<Policy>& builder, Args&&... args):
+        _source(builder._source), _name(builder._name), _fromAsset(builder._fromAsset), _loadError(builder._loadError), _budget(builder._budget),
+        _errorPolicy(builder._errorPolicy), _bound(std::make_unique<Storage>(std::forward<Args>(args)...)), _state(&_bound->state) {
+    }
+
+    Layer(Layer&& other) noexcept:
+        _source(std::move(other._source)), _name(std::move(other._name)), _fromAsset(other._fromAsset), _loadError(other._loadError), _budget(other._budget),
+        _errorPolicy(other._errorPolicy), _bound(std::move(other._bound)), _script(std::move(other._script)), _state(other._state), _started(other._started),
+        _hostStarted(other._hostStarted) {
+        // BoundStorage lives on the heap, so the state address survives the
+        // move; a borrowed state pointer is copied verbatim either way. The
+        // source is left null and unstarted -- not merely told to forget -- so
+        // a moved-from layer reports ScriptLoadFailed instead of running a
+        // chunk against storage this layer now owns.
+        if (_bound != nullptr) {
+            _state = &_bound->state;
+        }
+        other._state       = nullptr;
+        other._started     = false;
+        other._hostStarted = false;
+    }
+    auto operator=(Layer&& other) noexcept -> Layer& {
+        if (this != &other) {
+            _source      = std::move(other._source);
+            _name        = std::move(other._name);
+            _fromAsset   = other._fromAsset;
+            _loadError   = other._loadError;
+            _budget      = other._budget;
+            _errorPolicy = other._errorPolicy;
+            _bound       = std::move(other._bound);
+            _script      = std::move(other._script);
+            _state       = other._state;
+            _started     = other._started;
+            _hostStarted = other._hostStarted;
+            if (_bound != nullptr) {
+                _state = &_bound->state;
+            }
+            other._state       = nullptr;
+            other._started     = false;
+            other._hostStarted = false;
+        }
+        return *this;
+    }
+    Layer(const Layer&)                    = delete;
+    auto operator=(const Layer&) -> Layer& = delete;
+
+    [[nodiscard]] auto StatePtr() noexcept -> StateT* {
         return _state;
     }
+    // The host, for a caller that wants to poke at it between frames. Named
+    // HostPtr because Host is the fluent host-function policy hook.
+    [[nodiscard]] auto HostPtr() noexcept -> HostT*
+        requires(!std::is_void_v<HostT>)
+    {
+        return _bound != nullptr ? &_bound->host : nullptr;
+    }
+
+    // --- Policy mutators ---------------------------------------------------
+    // A hosted layer owns its storage in a unique_ptr and its state in the
+    // heap, so it can be re-policied only as an rvalue: every mutator moves
+    // the storage into a layer of the new policy type. A pure-data layer
+    // borrows its state and additionally offers the const& form, which yields
+    // a fresh, unstarted layer over the same state.
 
     template <Permission::Bit... Bs>
-    [[nodiscard]] auto Yes(Permission::Mask<Bs>... masks) const noexcept -> Layer<T, decltype(Policy {}.Yes(masks...))> {
+    [[nodiscard]] auto Yes(Permission::Mask<Bs>... masks) && -> Layer<StateT, HostT, decltype(Policy {}.Yes(masks...))> {
         using NextPolicy = decltype(Policy {}.Yes(masks...));
-        return Layer<T, NextPolicy>(ToBuilder<NextPolicy>(), *_state);
+        return Layer<StateT, HostT, NextPolicy>(ToBuilder<NextPolicy>(), std::move(*this), TemplatedDetail::RebindTag {});
     }
     template <Permission::Bit... Bs>
-    [[nodiscard]] auto No(Permission::Mask<Bs>... masks) const noexcept -> Layer<T, decltype(Policy {}.No(masks...))> {
+    [[nodiscard]] auto Yes(Permission::Mask<Bs>... masks) const& -> Layer<StateT, HostT, decltype(Policy {}.Yes(masks...))>
+        requires std::is_void_v<HostT>
+    {
+        return Clone<decltype(Policy {}.Yes(masks...))>();
+    }
+    template <Permission::Bit... Bs>
+    [[nodiscard]] auto No(Permission::Mask<Bs>... masks) && -> Layer<StateT, HostT, decltype(Policy {}.No(masks...))> {
         using NextPolicy = decltype(Policy {}.No(masks...));
-        return Layer<T, NextPolicy>(ToBuilder<NextPolicy>(), *_state);
+        return Layer<StateT, HostT, NextPolicy>(ToBuilder<NextPolicy>(), std::move(*this), TemplatedDetail::RebindTag {});
+    }
+    template <Permission::Bit... Bs>
+    [[nodiscard]] auto No(Permission::Mask<Bs>... masks) const& -> Layer<StateT, HostT, decltype(Policy {}.No(masks...))>
+        requires std::is_void_v<HostT>
+    {
+        return Clone<decltype(Policy {}.No(masks...))>();
     }
     template <typename... Ts>
-    [[nodiscard]] auto Write() const noexcept -> Layer<T, decltype(Policy {}.Yes(Permission::Write<Ts...>))> {
+    [[nodiscard]] auto Write() && -> Layer<StateT, HostT, decltype(Policy {}.Yes(Permission::Write<Ts...>))> {
         using NextPolicy = decltype(Policy {}.Yes(Permission::Write<Ts...>));
-        return Layer<T, NextPolicy>(ToBuilder<NextPolicy>(), *_state);
+        return Layer<StateT, HostT, NextPolicy>(ToBuilder<NextPolicy>(), std::move(*this), TemplatedDetail::RebindTag {});
+    }
+    template <typename... Ts>
+    [[nodiscard]] auto Write() const& -> Layer<StateT, HostT, decltype(Policy {}.Yes(Permission::Write<Ts...>))>
+        requires std::is_void_v<HostT>
+    {
+        return Clone<decltype(Policy {}.Yes(Permission::Write<Ts...>))>();
     }
     template <ZHLN::StringLiteral Name, auto Fn>
-    [[nodiscard]] auto Host(Permission::HostFnTag<Name, Fn> fn) const noexcept -> Layer<T, decltype(Policy {}.Host(fn))> {
+    [[nodiscard]] auto Host(Permission::HostFnTag<Name, Fn> fn) && -> Layer<StateT, HostT, decltype(Policy {}.Host(fn))> {
+        (void) fn;
         using NextPolicy = decltype(Policy {}.Host(fn));
-        return Layer<T, NextPolicy>(ToBuilder<NextPolicy>(), *_state);
+        return Layer<StateT, HostT, NextPolicy>(ToBuilder<NextPolicy>(), std::move(*this), TemplatedDetail::RebindTag {});
     }
-    [[nodiscard]] auto Budget(Lua::Budget value) const noexcept -> Layer {
-        auto builder = ToBuilder<Policy>();
-        builder._budget = value;
-        return Layer(builder, *_state);
+    template <ZHLN::StringLiteral Name, auto Fn>
+    [[nodiscard]] auto Host(Permission::HostFnTag<Name, Fn> fn) const& -> Layer<StateT, HostT, decltype(Policy {}.Host(fn))>
+        requires std::is_void_v<HostT>
+    {
+        (void) fn;
+        return Clone<decltype(Policy {}.Host(fn))>();
     }
-    [[nodiscard]] auto OnError(ErrorPolicy value) const noexcept -> Layer {
-        auto builder = ToBuilder<Policy>();
-        builder._errorPolicy = value;
-        return Layer(builder, *_state);
+    [[nodiscard]] auto Budget(Lua::Budget value) && -> Layer {
+        auto copy    = std::move(*this);
+        copy._budget = value;
+        return copy;
     }
+    [[nodiscard]] auto Budget(Lua::Budget value) const& -> Layer
+        requires std::is_void_v<HostT>
+    {
+        auto copy    = Clone<Policy>();
+        copy._budget = value;
+        return copy;
+    }
+    [[nodiscard]] auto OnError(ErrorPolicy value) && -> Layer {
+        auto copy         = std::move(*this);
+        copy._errorPolicy = value;
+        return copy;
+    }
+    [[nodiscard]] auto OnError(ErrorPolicy value) const& -> Layer
+        requires std::is_void_v<HostT>
+    {
+        auto copy         = Clone<Policy>();
+        copy._errorPolicy = value;
+        return copy;
+    }
+
+    // --- Lifecycle ---------------------------------------------------------
 
     [[nodiscard]] auto Start(COM::IEngine& engine) -> std::expected<void, ErrorCode> {
-        if (_loadError) {
-            return Fail(engine, "Start", *_loadError, "script file could not be read");
+        if (_started) {
+            return {};
         }
-        std::string source = _source;
-        if (_fromAsset) {
-            const auto assets = engine.Assets();
-            if (assets == nullptr) {
-                return Fail(engine, "Start", Error::FileReadFailed, "no asset library");
-            }
-            auto text = assets->ReadVirtualText(ZHLN::COM::StringView(_source));
-            if (!text) {
-                return Fail(engine, "Start", Error::FileReadFailed, "script asset was not found");
-            }
-            source = std::move(*text);
+        if (auto loaded = LoadAndCompile(engine, Phase::Start); !loaded) {
+            return loaded;
         }
-
-        auto compiled = Script<T>::template Compile<Policy>(source, _name, _budget);
-        if (!compiled) {
-            return Fail(engine, "Start", compiled.error(), "compile failed");
-        }
-        _script.emplace(std::move(*compiled));
-
-        // A Lua startup patch must land before C++ consumes the state it sets.
+        // A Lua startup patch must land before C++ consumes the state it sets,
+        // and before the host's OnStart reads it.
         if constexpr ((Policy::yes & static_cast<uint64_t>(Permission::Bit::Start)) != 0u) {
-            if (auto res = Invoke(*_state); !res) {
-                return Fail(engine, "Start", res.error(), _script->LastDetail());
+            if (auto patched = Evaluate(engine, Phase::Start); !patched) {
+                return patched;
             }
         }
-        if constexpr (requires(T& s, COM::IEngine& e) { s.OnStart(e); }) {
-            _state->OnStart(engine);
+        if constexpr (!std::is_void_v<HostT>) {
+            if (!_hostStarted && _bound != nullptr) {
+                _hostStarted = true;
+                _bound->host.HostT::OnStart(engine, *_state);
+            }
         }
-        ClearRuntimeError();
+        _started = true;
         return {};
     }
 
     [[nodiscard]] auto Tick(COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode>
         requires((Policy::yes & static_cast<uint64_t>(Permission::Bit::Tick)) != 0u)
     {
-        return RunFramePhase(engine, dt, "Tick");
+        return RunFramePhase(engine, dt, Phase::Tick);
     }
 
     [[nodiscard]] auto BeforeRender(COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode>
         requires((Policy::yes & static_cast<uint64_t>(Permission::Bit::BeforeRender)) != 0u)
     {
-        return RunFramePhase(engine, dt, "BeforeRender");
+        return RunFramePhase(engine, dt, Phase::BeforeRender);
     }
 
-    [[nodiscard]] auto AfterTick(COM::IEngine& engine) -> std::expected<void, ErrorCode>
+    // dt is forwarded, not zeroed: a host that accumulates elapsed time in
+    // OnPrepare must measure the frame the engine just simulated.
+    [[nodiscard]] auto AfterTick(COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode>
         requires((Policy::yes & static_cast<uint64_t>(Permission::Bit::AfterTick)) != 0u)
     {
-        return RunFramePhase(engine, 0.0f, "AfterTick");
+        return RunFramePhase(engine, dt, Phase::AfterTick);
     }
 
+    // Recompile from the configured source without re-entering the host's
+    // OnStart: a reload swaps the chunk, it does not rebuild the world.
     [[nodiscard]] auto Reload(COM::IEngine& engine) -> std::expected<void, ErrorCode>
         requires((Policy::yes & static_cast<uint64_t>(Permission::Bit::HotReload)) != 0u)
     {
-        return Start(engine);
+        return LoadAndCompile(engine, Phase::HotReload);
     }
 
     auto Stop(COM::IEngine& engine) -> void {
-        if constexpr (requires(T& s, COM::IEngine& e) { s.OnStop(e); }) {
-            _state->OnStop(engine);
+        // App calls Stop on every layer it entered, including one whose Start
+        // returned an error, so the host is torn down only if OnStart ran.
+        if constexpr (!std::is_void_v<HostT>) {
+            if (_hostStarted && _bound != nullptr) {
+                _hostStarted = false;
+                _bound->host.HostT::OnStop(engine);
+            }
         }
         _script.reset();
+        _started = false;
     }
 
-    // Explicitly rebuild the compiled chunk from newly loaded source.
+    // Rebuild the compiled chunk from text handed in by the caller (a file
+    // watcher, an editor bridge). The text becomes the configured source only
+    // once it compiles, so a later Reload never resurrects a broken buffer.
     [[nodiscard]] auto HotReloadSource(COM::IEngine& engine, std::string_view source) -> std::expected<void, ErrorCode> {
-        auto compiled = Script<T>::template Compile<Policy>(source, _name, _budget);
+        auto compiled = Script<StateT>::template CompileWithDiagnostics<Policy>(source, _name, _budget);
         if (!compiled) {
-            return Fail(engine, "HotReload", compiled.error(), "compile failed");
+            return Fail(engine, Phase::HotReload, compiled.error().code, compiled.error().detail);
         }
-        _script.emplace(std::move(*compiled));
+        _script    = std::move(*compiled);
+        _source    = std::string(source);
+        _fromAsset = false;
         return {};
     }
 
   private:
+    using Storage = TemplatedDetail::BoundStorage<StateT, HostT>;
+
+    // Exactly one dispatched phase per frame owns the C++ state boundary: Tick
+    // if granted, otherwise the first available frame hook.
+    static constexpr Phase kFrameBoundaryPhase = [] {
+        if constexpr ((Policy::yes & static_cast<uint64_t>(Permission::Bit::Tick)) != 0u) {
+            return Phase::Tick;
+        } else if constexpr ((Policy::yes & static_cast<uint64_t>(Permission::Bit::BeforeRender)) != 0u) {
+            return Phase::BeforeRender;
+        } else {
+            return Phase::AfterTick;
+        }
+    }();
+
+    // Moves the storage of `other` into a layer of a different policy type.
+    template <typename OtherPolicy>
+    Layer(const LayerBuilder<Policy>& builder, Layer<StateT, HostT, OtherPolicy>&& other, TemplatedDetail::RebindTag) noexcept:
+        _source(builder._source), _name(builder._name), _fromAsset(builder._fromAsset), _loadError(builder._loadError), _budget(builder._budget),
+        _errorPolicy(builder._errorPolicy), _bound(std::move(other._bound)), _script(std::move(other._script)), _state(other._state), _started(other._started),
+        _hostStarted(other._hostStarted) {
+        if (_bound != nullptr) {
+            _state = &_bound->state;
+        }
+        other._state       = nullptr;
+        other._started     = false;
+        other._hostStarted = false;
+    }
+
+    // A pure-data layer's const& mutators hand back an unstarted layer over
+    // the same borrowed state: a compiled Script owns its VM and cannot be
+    // copied, so the new layer compiles the chunk when it starts.
+    template <typename NextPolicy>
+    [[nodiscard]] auto Clone() const noexcept -> Layer<StateT, HostT, NextPolicy>
+        requires std::is_void_v<HostT>
+    {
+        return Layer<StateT, HostT, NextPolicy>(ToBuilder<NextPolicy>(), *_state);
+    }
+
     template <typename NextPolicy>
     [[nodiscard]] auto ToBuilder() const noexcept -> LayerBuilder<NextPolicy> {
         LayerBuilder<NextPolicy> builder;
@@ -1743,76 +2259,124 @@ class Layer {
         return builder;
     }
 
-    [[nodiscard]] auto Invoke(T& state) noexcept -> std::expected<void, ErrorCode> {
-        if (!_script.has_value()) {
-            return std::unexpected(Error::ScriptLoadFailed);
+    // Reads (or compiles) the source into `_script`. A failed recompile keeps
+    // the previous chunk, so a botched hot reload under ErrorPolicy::LogAndSkip
+    // leaves the last good script running instead of blanking the layer.
+    [[nodiscard]] auto LoadAndCompile(COM::IEngine& engine, Phase phase) -> std::expected<void, ErrorCode> {
+        // The only runtime fact worth adding here is which asset failed; the
+        // codes for the rest already read correctly on their own.
+        if (_loadError) {
+            return Fail(engine, phase, *_loadError, _source);
         }
-        return (*_script)(state);
+        std::string source = _source;
+        if (_fromAsset) {
+            const auto assets = engine.Assets();
+            if (assets == nullptr) {
+                return Fail(engine, phase, Error::FileReadFailed, {});
+            }
+            auto text = assets->ReadVirtualText(ZHLN::COM::StringView(_source));
+            if (!text) {
+                return Fail(engine, phase, Error::FileReadFailed, _source);
+            }
+            source = std::move(*text);
+        }
+
+        auto compiled = Script<StateT>::template CompileWithDiagnostics<Policy>(source, _name, _budget);
+        if (!compiled) {
+            return Fail(engine, phase, compiled.error().code, compiled.error().detail);
+        }
+        _script = std::move(*compiled);
+        return {};
     }
 
-    [[nodiscard]] auto RunFramePhase(COM::IEngine& engine, float dt, std::string_view phase) -> std::expected<void, ErrorCode> {
-        // Exactly one dispatched phase per frame owns the C++ state boundary:
-        // Tick if granted, otherwise the first available frame hook.
-        static constexpr std::string_view kFrameBoundaryPhase = [] {
-            if constexpr ((Policy::yes & static_cast<uint64_t>(Permission::Bit::Tick)) != 0u) {
-                return std::string_view {"Tick"};
-            } else if constexpr ((Policy::yes & static_cast<uint64_t>(Permission::Bit::BeforeRender)) != 0u) {
-                return std::string_view {"BeforeRender"};
-            } else {
-                return std::string_view {"AfterTick"};
-            }
-        }();
-        const bool frameBoundary = (phase == kFrameBoundaryPhase);
-        if (frameBoundary) {
-            TemplatedDetail::ResetOneShots(*_state);
-            if constexpr (requires(T& s, COM::IEngine& e, float d) { s.BeforeLua(e, d); }) {
-                _state->BeforeLua(engine, dt);
-            }
+    // Runs the reducer once and commits its patch. A layer that started with
+    // ErrorPolicy::LogAndSkip and no chunk (LoadAndCompile failed) skips the
+    // call instead of failing, and re-recording, every frame.
+    [[nodiscard]] auto Evaluate(COM::IEngine& engine, Phase phase) -> std::expected<void, ErrorCode> {
+        if (!_script.has_value()) {
+            return {};
         }
-        if (auto res = Invoke(*_state); !res) {
-            return Fail(engine, phase, res.error(), _script.has_value() ? _script->LastDetail() : std::string_view {});
-        }
-        if (frameBoundary) {
-            if constexpr (requires(T& s, COM::IEngine& e, float d) { s.AfterLua(e, d); }) {
-                _state->AfterLua(engine, dt);
-            } else if constexpr (requires(T& s, COM::IEngine& e) { s.AfterLua(e); }) {
-                _state->AfterLua(engine);
-            }
-            ClearRuntimeError();
+        ScriptDiagnostics diagnostics;
+        if (auto res = (*_script)(*_state, diagnostics); !res) {
+            return Fail(engine, phase, res.error().code, diagnostics.detail);
         }
         return {};
     }
 
-    [[nodiscard]] auto Fail(COM::IEngine& engine, std::string_view phase, ErrorCode code, std::string_view detail) const -> std::expected<void, ErrorCode> {
-        const auto  error = code.get<Error>().value_or(Error::RuntimeError);
-        const auto  text  = ZHLN::Reflect::EnumMessageOf(error);
-        SetRuntimeError(error, std::format("{}: {}: {}", phase, text, detail));
+    [[nodiscard]] auto RunFramePhase(COM::IEngine& engine, float dt, Phase phase) -> std::expected<void, ErrorCode> {
+        if (!_started || _state == nullptr) {
+            return Fail(engine, phase, Error::ScriptLoadFailed, {});
+        }
+        const bool frameBoundary = (phase == kFrameBoundaryPhase);
+        if (frameBoundary) {
+            // One-shot intents are produced once per frame: clear them before
+            // the host writes the inputs the chunk will read.
+            TemplatedDetail::ResetOneShots(*_state);
+            if constexpr (!std::is_void_v<HostT>) {
+                if (_bound != nullptr) {
+                    _bound->host.HostT::OnPrepare(engine, *_state, dt);
+                }
+            }
+        }
+        if (auto res = Evaluate(engine, phase); !res) {
+            return res;
+        }
+        if (frameBoundary) {
+            if constexpr (!std::is_void_v<HostT>) {
+                if (_bound != nullptr) {
+                    _bound->host.HostT::OnCommit(engine, *_state);
+                }
+            }
+        }
+        return {};
+    }
+
+    // One failure path for both policies, so neither can silently lose the
+    // reason:
+    //   * the detail goes into IErrorRegistry, because App's exit status only
+    //     keeps the returned ErrorCode and a caller reading that still needs to
+    //     know where and why;
+    //   * the same line is logged -- Error under ErrorPolicy::Fail, Warning
+    //     under LogAndSkip -- on the channel the registry record names, so a
+    //     layer that fails without overriding OnError still tells someone;
+    //   * the host is told last, with the Failure the layer already built.
+    [[nodiscard]] auto Fail(COM::IEngine& engine, Phase phase, ErrorCode code, std::string_view detail) -> std::expected<void, ErrorCode> {
+        const auto failure = Failure {.phase = phase, .code = code, .detail = detail};
+        constexpr std::string_view kChannel = "Lua";
+        if (auto* errors = engine.Errors(); errors != nullptr) {
+            errors->RecordDetail(code, COM::LogSource {.file = std::string_view(_name), .channel = kChannel}, COM::StringView(detail));
+        }
+        const auto log = COM::LoggerView {engine.Logger(), kChannel};
         if (_errorPolicy == ErrorPolicy::LogAndSkip) {
-            COM::LoggerView {engine.Logger(), "Lua"}.Warn("{}: {} ({})", phase, text, detail);
+            log.Warn("{}", failure.Describe());
+        } else {
+            log.Error("{}", failure.Describe());
+        }
+        if constexpr (!std::is_void_v<HostT>) {
+            if (_bound != nullptr) {
+                _bound->host.HostT::OnError(engine, failure);
+            }
+        }
+        if (_errorPolicy == ErrorPolicy::LogAndSkip) {
             return {};
         }
         return std::unexpected(code);
     }
 
-    void ClearRuntimeError() const noexcept {
-        if constexpr (std::derived_from<T, Runtime>) {
-            _state->ClearLastError();
-        }
-    }
-    void SetRuntimeError(Error error, std::string message) const {
-        if constexpr (std::derived_from<T, Runtime>) {
-            _state->SetLastError(error, std::move(message));
-        }
-    }
+    std::string                   _source;
+    std::string                   _name;
+    bool                          _fromAsset = false;
+    std::optional<ErrorCode>      _loadError;
+    Lua::Budget                   _budget {};
+    ErrorPolicy                   _errorPolicy = ErrorPolicy::Fail;
+    std::unique_ptr<Storage>      _bound; // hosted layers only
+    std::optional<Script<StateT>> _script;
+    StateT*                       _state       = nullptr; // borrowed, or &_bound->state
+    bool                          _started     = false;
+    bool                          _hostStarted = false;
 
-    std::string  _source;
-    std::string  _name;
-    bool                     _fromAsset  = false;
-    std::optional<ErrorCode> _loadError;
-    Lua::Budget              _budget {};
-    ErrorPolicy              _errorPolicy = ErrorPolicy::Fail;
-    T*                       _state = nullptr;
-    std::optional<Script<T>> _script;
+    template <typename, typename, typename>
+    friend class Layer;
 };
 
 inline auto FromAsset(std::string_view path) noexcept -> LayerBuilder<> {
@@ -1832,5 +2396,4 @@ template <typename Bytes>
     return LayerBuilder<>::FromString(bytes, name);
 }
 
-} // namespace Lua
-} // namespace ZHLN
+}} // namespace ZHLN::Lua

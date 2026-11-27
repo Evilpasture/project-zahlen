@@ -14,6 +14,12 @@
 
 #include "TestsFramework.hpp"
 #include <Scene/Scene.hpp>
+#include <Zahlen/COM/IActionContext.hpp>
+#include <Zahlen/COM/IAudioDevice.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/COM/ISimulation.hpp>
+#include <Zahlen/COM/IState.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Core/String.hpp>
@@ -186,7 +192,7 @@ auto ReportSumHostFn(ZHLN::Lua::CallFrame& frame) -> int {
     return 0;
 }
 
-struct SandboxMirror: ZHLN::Lua::Runtime {
+struct SandboxMirror {
     struct: ZHLN::Lua::ReadOnly {
         float elapsed = 1.0f;
         bool  keyF    = true;
@@ -394,7 +400,7 @@ struct LuaSuite {
         if (unknownRes) {
             return std::unexpected(LuaSuiteFail::ExpectedFailureDidNotHappen);
         }
-        if (!(unknownRes.error() == ZHLN::Lua::Error::UnknownField)|| !Near(live.post.exposure, 2.2f)) {
+        if (!(unknownRes.error() == ZHLN::Lua::Error::UnknownField) || !Near(live.post.exposure, 2.2f)) {
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         }
 
@@ -452,10 +458,10 @@ struct LuaSuite {
         if (!shortSeq || !Near(color.x, 7.0f) || !Near(color.y, 8.0f) || !Near(color.z, 3.0f) || !Near(color.w, 4.0f))
             return std::unexpected(LuaSuiteFail::WrongValue);
         auto bad = ZHLN::Lua::ApplyPatchString(color, "return { 5, 'bad' }");
-        if (bad || !(bad.error() == ZHLN::Lua::Error::TypeMismatch)|| !Near(color.x, 7.0f) || !Near(color.y, 8.0f))
+        if (bad || !(bad.error() == ZHLN::Lua::Error::TypeMismatch) || !Near(color.x, 7.0f) || !Near(color.y, 8.0f))
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         auto longSeq = ZHLN::Lua::ApplyPatchString(color, "return { 1, 2, 3, 4, 5 }");
-        if (longSeq || !(longSeq.error() == ZHLN::Lua::Error::OutOfRange)|| !Near(color.x, 7.0f))
+        if (longSeq || !(longSeq.error() == ZHLN::Lua::Error::OutOfRange) || !Near(color.x, 7.0f))
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
 
         // Constructing a new vector retains the full-sequence value contract.
@@ -474,7 +480,7 @@ struct LuaSuite {
             "return function(m) return m end", "matrix_roundtrip", ZHLN::Lua::Budget {}, *matrix);
         if (!roundTrip || roundTrip->elements != matrix->elements) return std::unexpected(LuaSuiteFail::WrongValue);
         auto bad = ZHLN::Lua::ApplyPatchString(*matrix, "return { 1, 2 }");
-        if (bad || !(bad.error() == ZHLN::Lua::Error::OutOfRange)|| (*matrix)[0, 1] != 5.0f)
+        if (bad || !(bad.error() == ZHLN::Lua::Error::OutOfRange) || (*matrix)[0, 1] != 5.0f)
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         return {};
     }
@@ -697,12 +703,15 @@ struct LuaSuite {
 
 namespace {
 
-struct LuaScriptState: ZHLN::Lua::Runtime {
-    int32_t     value      = 1;
-    int32_t     steps      = 0;
-    std::string label      = "before";
-    float       speed      ZHLN_ANNOTATION(ZHLN::Lua::ReadOnly {}) = 1.0f;
-    bool        spawn      ZHLN_ANNOTATION(ZHLN::Lua::OneShot {})  = false;
+// A plain aggregate, on purpose: the script boundary is data, and the host
+// half (if any) is a separate Runtime<State>. Each annotation member exercises
+// one branch of PushState/StageObject.
+struct LuaScriptState {
+    int32_t                    value                                   = 1;
+    int32_t                    steps                                   = 0;
+    std::string                label                                   = "before";
+    float speed                ZHLN_ANNOTATION(ZHLN::Lua::ReadOnly {}) = 1.0f;
+    bool spawn                 ZHLN_ANNOTATION(ZHLN::Lua::OneShot {})  = false;
     std::unique_ptr<int> owned ZHLN_ANNOTATION(ZHLN::Lua::Hidden {}) = std::make_unique<int>(7);
 
   private:
@@ -713,7 +722,7 @@ auto LuaAddOne(int64_t value) -> int64_t {
     return value + 1;
 }
 
-struct TaggedScriptState: ZHLN::Lua::Runtime {
+struct TaggedScriptState {
     struct: ZHLN::Lua::ReadOnly {
         int32_t locked = 7;
     } in {};
@@ -768,12 +777,19 @@ struct LuaScriptSuite {
                 return std::unexpected(readOnly.error());
             }
             LuaScriptState state;
-            auto res = (*readOnly)(state);
+            ZHLN::Lua::ScriptDiagnostics diagnostics;
+            auto                        res = (*readOnly)(state, diagnostics);
             if (res || state.speed != 1.0f) {
                 return std::unexpected(LuaSuiteFail::ExpectedFailureDidNotHappen);
             }
-            if (state.LastError() == std::nullopt || state.LastError()->code != ZHLN::Lua::Error::ReadOnlyField) {
-                // Script does not set Runtime::LastError; only the Layer does.
+            // The failure carries everything: the code AND the field that was
+            // refused. Nothing is cached on the Script, so this is the only
+            // place the reason exists.
+            if (res.error().get<ZHLN::Lua::Error>() != ZHLN::Lua::Error::ReadOnlyField) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+            if (diagnostics.detail.find("speed") == std::string::npos) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
             }
 
             auto unknown = ZHLN::Lua::Compile<LuaScriptState>(
@@ -782,9 +798,16 @@ struct LuaScriptSuite {
             if (!ZHLN::Test::ExpectFalse(!unknown)) {
                 return std::unexpected(unknown.error());
             }
-            auto unknownRes = (*unknown)(state);
+            ZHLN::Lua::ScriptDiagnostics unknownDiagnostics;
+            auto                        unknownRes = (*unknown)(state, unknownDiagnostics);
             if (unknownRes || state.value != 1) {
                 return std::unexpected(LuaSuiteFail::ExpectedFailureDidNotHappen);
+            }
+            // A sibling field staged in the same table must not have landed:
+            // the whole patch is transactional.
+            if (unknownRes.error().get<ZHLN::Lua::Error>() != ZHLN::Lua::Error::UnknownField ||
+                unknownDiagnostics.detail.find("bogus") == std::string::npos) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
             }
             return {};
         }
@@ -841,8 +864,8 @@ struct LuaScriptSuite {
             static_assert((NoTickPolicy::yes & static_cast<uint64_t>(ZHLN::Lua::Permission::Bit::Tick)) == 0u);
             static_assert((TickPolicy::yes & static_cast<uint64_t>(ZHLN::Lua::Permission::Bit::Print)) != 0u);
 
-            static_assert(kCanTick<ZHLN::Lua::Layer<LuaScriptState, TickPolicy>>);
-            static_assert(!kCanTick<ZHLN::Lua::Layer<LuaScriptState, NoTickPolicy>>);
+            static_assert(kCanTick<ZHLN::Lua::Layer<LuaScriptState, void, TickPolicy>>);
+            static_assert(!kCanTick<ZHLN::Lua::Layer<LuaScriptState, void, NoTickPolicy>>);
             return {};
         }
 
@@ -871,10 +894,16 @@ struct LuaScriptSuite {
             if (!ZHLN::Test::ExpectFalse(!denied)) {
                 return std::unexpected(denied.error());
             }
-            auto res = (*denied)(state);
-            const auto code = res ? std::optional<ZHLN::ErrorCode> {} : std::optional<ZHLN::ErrorCode> {res.error()};
-            if (res || state.in.locked != 7 || !code ||
-                code->get<ZHLN::Lua::Error>() != ZHLN::Lua::Error::ReadOnlyField) {
+            ZHLN::Lua::ScriptDiagnostics deniedDiagnostics;
+            auto                        res = (*denied)(state, deniedDiagnostics);
+            if (res || state.in.locked != 7) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+            // The refused field is the read-only *block* (`in`), not the leaf
+            // it tried to reach: assignability is decided per member of the
+            // state, and a ReadOnly-derived sub-struct is refused as a whole.
+            if (res.error().get<ZHLN::Lua::Error>() != ZHLN::Lua::Error::ReadOnlyField ||
+                deniedDiagnostics.detail.find("'in'") == std::string::npos) {
                 return std::unexpected(LuaSuiteFail::WrongErrorCode);
             }
             return {};
@@ -975,6 +1004,750 @@ struct LuaScriptSuite {
             if (state.spawn) {
                 return std::unexpected(LuaSuiteFail::WrongValue);
             }
+            return {};
+        }
+    };
+};
+
+// --- ZHLN::Lua: hosts, phases, and error policy ---------------------------
+//
+// These cases drive the layer through a CPU-only stub engine. The layer is a
+// thin coordinator over four things that are easy to get wrong and invisible
+// from the outside: which phase failed, whether a reload re-enters the host,
+// whether a swallowed error still reaches the registry, and whether a botched
+// hot reload destroys the last good chunk. Each case below names one.
+
+// A minimal IEngine: IObject's three virtuals come from COM::Implements, and
+// everything the Lua layer touches (Errors, Logger, Assets) is a null-safe
+// stub. Nothing here needs a GPU, a window, or a physics world.
+struct StubEngine final: ZHLN::COM::Implements<StubEngine, ZHLN::COM::IEngine> {
+    ZHLN::COM::Ref<ZHLN::COM::IErrorRegistry> errors;
+
+    StubEngine(): errors(*ZHLN::COM::CreateErrorRegistry()) {
+    }
+
+    bool IsRunning() const noexcept override {
+        return true;
+    }
+    void ProcessEvents() noexcept override {
+    }
+    void RequestClose() noexcept override {
+    }
+    ZHLN::COM::Result<void> Tick(float) noexcept override {
+        return {};
+    }
+    void ClearScene() noexcept override {
+    }
+    ZHLN::COM::ILogger* Logger() noexcept override {
+        return nullptr;
+    }
+    ZHLN::COM::IErrorRegistry* Errors() noexcept override {
+        return errors.Get();
+    }
+    ZHLN::COM::IGraphicsDevice* Graphics() noexcept override {
+        return nullptr;
+    }
+    ZHLN::COM::IEntities* Entities() noexcept override {
+        return nullptr;
+    }
+    ZHLN::COM::ISimulation* Simulation() noexcept override {
+        return nullptr;
+    }
+    ZHLN::COM::IAudioDevice* Audio() noexcept override {
+        return nullptr;
+    }
+    ZHLN::COM::IAssetLibrary* Assets() noexcept override {
+        return nullptr;
+    }
+    ZHLN::COM::IActionContext* Actions() noexcept override {
+        return nullptr;
+    }
+    ZHLN::COM::IState* State() noexcept override {
+        return nullptr;
+    }
+    ZHLN::COM::IDebugDraw* Debug() noexcept override {
+        return nullptr;
+    }
+    void SetMaxFramesPerSecond(uint32_t) noexcept override {
+    }
+    uint32_t MaxFramesPerSecond() const noexcept override {
+        return 0;
+    }
+    uint64_t CurrentFrame() const noexcept override {
+        return 0;
+    }
+    uint64_t DeviceGeneration() const noexcept override {
+        return 0;
+    }
+    ZHLN::COM::Result<void> RecreateGraphicsDevice() noexcept override {
+        return {};
+    }
+    ZHLN::COM::Result<uint64_t> AddDeviceLostCallback(void (*)(void*), void*) noexcept override {
+        return uint64_t {0};
+    }
+    void RemoveDeviceLostCallback(uint64_t) noexcept override {
+    }
+    ZHLN::WindowID PrimaryWindow() const noexcept override {
+        return {};
+    }
+    uint32_t WindowsRaw(ZHLN::WindowID*, uint32_t) const noexcept override {
+        return 0;
+    }
+    ZHLN::Extent2D WindowExtent(ZHLN::WindowID) const noexcept override {
+        return {};
+    }
+    bool IsWindowFocused(ZHLN::WindowID) const noexcept override {
+        return false;
+    }
+    ZHLN::COM::Result<ZHLN::WindowID> AddWindow(const ZHLN::COM::ChainInNode*) noexcept override {
+        return ZHLN::WindowID {};
+    }
+    void RemoveWindow(ZHLN::WindowID) noexcept override {
+    }
+    bool IsWindowRunning(ZHLN::WindowID) const noexcept override {
+        return false;
+    }
+    void CloseWindow(ZHLN::WindowID) noexcept override {
+    }
+    void FocusWindow(ZHLN::WindowID) noexcept override {
+    }
+    void SetCursorMode(ZHLN::WindowID, ZHLN::CursorMode) noexcept override {
+    }
+    ZHLN::CursorMode GetCursorMode(ZHLN::WindowID) const noexcept override {
+        return ZHLN::CursorMode::System;
+    }
+    void CaptureMouse(ZHLN::WindowID, bool) noexcept override {
+    }
+    bool IsMouseCaptured(ZHLN::WindowID) const noexcept override {
+        return false;
+    }
+    ZHLN::COM::Result<void> SetClipboardText(ZHLN::COM::StringView) noexcept override {
+        return {};
+    }
+    ZHLN::COM::Result<uint32_t> ClipboardTextRaw(char*, uint32_t) const noexcept override {
+        return uint32_t {0};
+    }
+    ZHLN::COM::Result<void> SetFileDropCallback(ZHLN::WindowID, ZHLN::COM::FileDropCallback, void*) noexcept override {
+        return {};
+    }
+    ZHLN::COM::Result<void> ReadHostInput(ZHLN::WindowID, ZHLN::COM::ChainOutNode*, bool) noexcept override {
+        return {};
+    }
+    ZHLN::COM::Result<void> SubmitUI(ZHLN::WindowID, const ZHLN::COM::ChainInNode*) noexcept override {
+        return {};
+    }
+};
+
+// The detail the layer attached to the last recorded error code.
+[[nodiscard]] auto RecordedDetail(ZHLN::COM::IErrorRegistry& registry) -> std::string {
+    ZHLN::COM::ErrorRecord record {};
+    if (!registry.LastError(ZHLN::COM::OutChain(record).Head()).HasValue()) {
+        return {};
+    }
+    return std::string(std::string_view(record.detail));
+}
+
+struct HostState {
+    struct: ZHLN::Lua::ReadOnly {
+        float elapsed = 0.0f;
+    } in {};
+
+    struct: ZHLN::Lua::OneShot {
+        bool spawn = false;
+    } out {};
+
+    int32_t ticks = 0;
+};
+
+// Every hook the layer can call, recording what it saw. `final` is part of the
+// contract: the layer only binds a final host, and only ever calls the hooks
+// through the qualified `host.HostT::On...` form.
+//
+// OnPrepare is deliberately three-argument: the layer forwards the frame delta
+// so a host can accumulate elapsed time, which is exactly what the sandbox does.
+struct RecordingHost final: ZHLN::Lua::Runtime<HostState> {
+    struct Journal {
+        int              starts          = 0;
+        int              prepares        = 0;
+        int              commits         = 0;
+        int              stops           = 0;
+        int              errors          = 0;
+        float            lastDt          = -1.0f;
+        float            elapsedAtCommit = -1.0f;
+        ZHLN::Lua::Phase lastPhase       = ZHLN::Lua::Phase::Start;
+        ZHLN::ErrorCode  lastCode {};
+        std::string      lastDetail;
+        bool             preparedWithMutableState = false;
+        bool             startedWithSpawn         = false;
+    };
+
+    explicit RecordingHost(Journal& journal): _journal(&journal) {
+    }
+
+    // Two-argument: the layer hands over the state the startup patch produced,
+    // so a host can read what the script authored before the first frame --
+    // here the `out.spawn` one-shot the chunk set, which is the state a real
+    // host acts on.
+    void OnStart(ZHLN::COM::IEngine& engine, HostState& state) override {
+        (void) engine;
+        ++_journal->starts;
+        _journal->startedWithSpawn = state.out.spawn;
+    }
+    void OnPrepare(ZHLN::COM::IEngine& engine, HostState& state, float dt) override {
+        (void) engine;
+        ++_journal->prepares;
+        _journal->lastDt                   = dt;
+        _journal->preparedWithMutableState = true;
+        state.in.elapsed += dt;
+    }
+    void OnCommit(ZHLN::COM::IEngine& engine, const HostState& state) override {
+        (void) engine;
+        ++_journal->commits;
+        _journal->elapsedAtCommit = state.in.elapsed;
+    }
+    void OnStop(ZHLN::COM::IEngine& engine) override {
+        (void) engine;
+        ++_journal->stops;
+    }
+    void OnError(ZHLN::COM::IEngine& engine, const ZHLN::Lua::Failure& failure) override {
+        (void) engine;
+        ++_journal->errors;
+        _journal->lastPhase   = failure.phase;
+        _journal->lastCode    = failure.code;
+        _journal->lastDetail  = std::string(failure.detail);
+    }
+
+  private:
+    Journal* _journal = nullptr;
+};
+
+struct LuaLayerSuite {
+    struct Tests {
+        auto TestPhaseEnumAndNames() -> std::expected<void, ZHLN::ErrorCode> {
+            // Phase is the wire vocabulary between the layer and a host; the
+            // names are what an error message and the registry carry.
+            static_assert(std::is_same_v<std::underlying_type_t<ZHLN::Lua::Phase>, uint8_t>);
+            constexpr std::array<ZHLN::Lua::Phase, 5> kAll {
+                ZHLN::Lua::Phase::Start, ZHLN::Lua::Phase::Tick, ZHLN::Lua::Phase::BeforeRender, ZHLN::Lua::Phase::AfterTick, ZHLN::Lua::Phase::HotReload,
+            };
+            for (const auto phase: kAll) {
+                if (ZHLN::Lua::PhaseName(phase) == "Unknown") {
+                    return std::unexpected(LuaSuiteFail::WrongValue);
+                }
+            }
+            return {};
+        }
+
+        auto TestScriptErrorCarriesCodeAndDetail() -> std::expected<void, ZHLN::ErrorCode> {
+            // The plain form reports the code alone: this is the whole answer
+            // for a caller that branches on it, and it costs no allocation.
+            auto script = ZHLN::Lua::Compile<LuaScriptState>("return function(state) return { speed = 4.0 } end", "detail.lua").Build();
+            if (!ZHLN::Test::ExpectFalse(!script)) {
+                return std::unexpected(script.error());
+            }
+            LuaScriptState state;
+            auto           bare = (*script)(state);
+            if (bare || bare.error() != ZHLN::Lua::Error::ReadOnlyField) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+
+            // The diagnostics form adds why, with nothing cached on the Script
+            // for a later call to read.
+            ZHLN::Lua::ScriptDiagnostics diagnostics;
+            auto                        res = (*script)(state, diagnostics);
+            if (res) {
+                return std::unexpected(LuaSuiteFail::ExpectedFailureDidNotHappen);
+            }
+            if (res.error().get<ZHLN::Lua::Error>() != ZHLN::Lua::Error::ReadOnlyField) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+            if (diagnostics.detail.find("speed") == std::string::npos) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+
+            // A syntax error has no patch detail, so the VM's own message --
+            // which names the chunk -- is what surfaces.
+            auto broken = ZHLN::Lua::Script<LuaScriptState>::CompileWithDiagnostics("return function(state) return {", "broken.lua");
+            if (broken || broken.error().detail.find("broken.lua") == std::string::npos) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            return {};
+        }
+
+        auto TestDiagnosticsAreOptIn() -> std::expected<void, ZHLN::ErrorCode> {
+            // The default path returns a bare ErrorCode: no std::string in the
+            // value, so a caller that only branches on the code pays nothing.
+            // The *WithDiagnostics form is where the reason lives.
+            struct State {
+                float speed = 1.0f;
+            } state;
+
+            static_assert(std::is_same_v<decltype(ZHLN::Lua::ApplyPatchString(state, "return {}")), std::expected<void, ZHLN::ErrorCode>>);
+            static_assert(std::is_same_v<decltype(ZHLN::Lua::EvaluateString<int>("return 1")), std::expected<int, ZHLN::ErrorCode>>);
+            static_assert(std::is_same_v<decltype(ZHLN::Lua::Compile<State>("return function() end", "x").Build()), std::expected<ZHLN::Lua::Script<State>, ZHLN::ErrorCode>>);
+
+            // ScriptError substitutes for ErrorCode, so a diagnostics caller
+            // can still compare without reaching into `code`.
+            auto patched = ZHLN::Lua::ApplyPatchStringWithDiagnostics(state, "return { bogus = 1 }");
+            if (patched || !(patched.error() == ZHLN::Lua::Error::UnknownField) || !(patched.error().get<ZHLN::Lua::Error>() == ZHLN::Lua::Error::UnknownField)) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+            if (patched.error().detail != "unknown field 'bogus'") {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+
+            // Describe() renders the enum description once, not twice: the
+            // duplication that a separate `message` member used to cause.
+            const auto described = ZHLN::Lua::Failure {
+                .phase = ZHLN::Lua::Phase::Start, .code = ZHLN::Lua::Error::UnknownField, .detail = "unknown field 'bogus'",
+            }.Describe();
+            constexpr std::string_view kSentence = "key not present on the reflected C++ struct";
+            if (described.find(kSentence) != described.rfind(kSentence)) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            return {};
+        }
+
+        auto TestNestedFailureNamesItsField() -> std::expected<void, ZHLN::ErrorCode> {
+            // A failure inside a sub-struct must name the member that led
+            // there. Both patching paths are checked because they compose the
+            // path in different places: ApplyPatchString walks PatchObject,
+            // while Script<T> walks the staged StageObject.
+            struct Inner {
+                float speed = 1.0f;
+            };
+            struct Nested {
+                Inner   out {};
+                int32_t value = 0;
+            } state;
+
+            auto patched = ZHLN::Lua::ApplyPatchStringWithDiagnostics(state, "return { out = { speed = 'not a number' } }", "nested.lua");
+            if (patched) {
+                return std::unexpected(LuaSuiteFail::ExpectedFailureDidNotHappen);
+            }
+            if (!(patched.error() == ZHLN::Lua::Error::TypeMismatch)) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+            // No trailing separator either: the inner failure carries no detail
+            // of its own, so the message must stop at the field name.
+            if (patched.error().detail != "field 'out': field 'speed'") {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+
+            auto script = ZHLN::Lua::Compile<Nested>("return function(s) return { out = { speed = 'not a number' } } end", "nested.lua").Build();
+            if (!ZHLN::Test::ExpectFalse(!script)) {
+                return std::unexpected(script.error());
+            }
+            ZHLN::Lua::ScriptDiagnostics evaluatedDiagnostics;
+            auto                        evaluated = (*script)(state, evaluatedDiagnostics);
+            if (evaluated) {
+                return std::unexpected(LuaSuiteFail::ExpectedFailureDidNotHappen);
+            }
+            if (!(evaluated.error() == ZHLN::Lua::Error::TypeMismatch)) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+            if (evaluatedDiagnostics.detail != "field 'out': field 'speed'") {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+
+            // Neither path may have committed a half-applied patch.
+            if (!Near(state.out.speed, 1.0f) || state.value != 0) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            return {};
+        }
+
+        auto TestPlainStateLayerLifecycle() -> std::expected<void, ZHLN::ErrorCode> {
+            StubEngine engine;
+            struct PlainState {
+                int32_t value = 1;
+            } state;
+
+            auto layer = ZHLN::Lua::FromString("return function(s) return { value = 7 } end", "plain.lua").Yes(ZHLN::Lua::Permission::Tick).State(state);
+            // Frame phases before Start must fail, not run against no chunk.
+            auto early = layer.Tick(engine, 0.016f);
+            if (early || early.error().get<ZHLN::Lua::Error>() != ZHLN::Lua::Error::ScriptLoadFailed) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+            if (!ZHLN::Test::ExpectFalse(!layer.Start(engine))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            // The startup patch lands before Start returns.
+            if (state.value != 7) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            if (!ZHLN::Test::ExpectFalse(!layer.Tick(engine, 0.016f))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            layer.Stop(engine);
+            return {};
+        }
+
+        auto TestHostLifecycleAndQualifiedHooks() -> std::expected<void, ZHLN::ErrorCode> {
+            StubEngine             engine;
+            RecordingHost::Journal journal;
+
+            auto layer = ZHLN::Lua::FromString("return function(s) return { ticks = s.ticks + 1, out = { spawn = true } } end", "hosted.lua")
+                             .Yes(ZHLN::Lua::Permission::Tick)
+                             .Bind<RecordingHost>(journal);
+
+            // A hosted layer owns its state; HostPtr/StatePtr are how a caller
+            // reaches it.
+            if (layer.HostPtr() == nullptr || layer.StatePtr() == nullptr) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            if (journal.starts != 0) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+
+            if (!ZHLN::Test::ExpectFalse(!layer.Start(engine))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            if (journal.starts != 1) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            // The startup chunk has already run, so OnStart saw the one-shot it
+            // authored rather than an untouched default: this is the sandbox's
+            // lamp position in miniature.
+            if (!journal.startedWithSpawn) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            // Start is idempotent: App may hand the same layer a second frame.
+            if (!ZHLN::Test::ExpectFalse(!layer.Start(engine)) || journal.starts != 1) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+
+            // One frame: OnPrepare (with dt) -> chunk -> OnCommit.
+            if (!ZHLN::Test::ExpectFalse(!layer.Tick(engine, 0.5f))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            if (journal.prepares != 1 || journal.commits != 1 || !journal.preparedWithMutableState) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            if (!Near(journal.lastDt, 0.5f) || !Near(journal.elapsedAtCommit, 0.5f)) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            // Permission::Start is in the default mask, so the chunk also ran
+            // once at Start: the first Tick is the second evaluation.
+            if (layer.StatePtr()->ticks != 2 || !layer.StatePtr()->out.spawn) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+
+            layer.Stop(engine);
+            if (journal.stops != 1) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            // Stop is idempotent too, and must not re-enter OnStop.
+            layer.Stop(engine);
+            if (journal.stops != 1) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            return {};
+        }
+
+        auto TestAfterTickForwardsDt() -> std::expected<void, ZHLN::ErrorCode> {
+            // AfterTick used to pass 0.0f; a host accumulating elapsed time in
+            // OnPrepare measured nothing. The dt the caller passed must arrive.
+            StubEngine             engine;
+            RecordingHost::Journal journal;
+            auto                   layer = ZHLN::Lua::FromString("return function(s) return { ticks = 1 } end", "after.lua")
+                                               .No(ZHLN::Lua::Permission::Tick)
+                                               .Yes(ZHLN::Lua::Permission::AfterTick)
+                                               .Bind<RecordingHost>(journal);
+            if (!ZHLN::Test::ExpectFalse(!layer.Start(engine))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            if (!ZHLN::Test::ExpectFalse(!layer.AfterTick(engine, 0.25f))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            if (!Near(journal.lastDt, 0.25f)) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            layer.Stop(engine);
+            return {};
+        }
+
+        auto TestFailPolicyPropagatesAndRecords() -> std::expected<void, ZHLN::ErrorCode> {
+            StubEngine             engine;
+            RecordingHost::Journal journal;
+            auto                   layer = ZHLN::Lua::FromString("return function(s) return { bogus = 1 } end", "fail.lua")
+                                               .Yes(ZHLN::Lua::Permission::Tick)
+                                               .OnError(ZHLN::Lua::ErrorPolicy::Fail)
+                                               .Bind<RecordingHost>(journal);
+
+            // The startup patch runs inside Start, so the bad field fails there.
+            auto res = layer.Start(engine);
+            if (res) {
+                return std::unexpected(LuaSuiteFail::ExpectedFailureDidNotHappen);
+            }
+            if (res.error().get<ZHLN::Lua::Error>() != ZHLN::Lua::Error::UnknownField) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+            if (journal.errors != 1 || journal.lastPhase != ZHLN::Lua::Phase::Start) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            if (journal.lastDetail.find("bogus") == std::string::npos) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            // The whole reason Fail exists: the registry owns the detail after
+            // the caller only keeps the code.
+            if (RecordedDetail(*engine.Errors()).find("bogus") == std::string::npos) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            // OnStart never ran, so Stop must not run OnStop either -- App calls
+            // Stop on entered layers even when Start failed.
+            layer.Stop(engine);
+            if (journal.starts != 0 || journal.stops != 0) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            return {};
+        }
+
+        auto TestLogAndSkipStillRecordsAndKeepsRunning() -> std::expected<void, ZHLN::ErrorCode> {
+            StubEngine             engine;
+            RecordingHost::Journal journal;
+            auto                   layer = ZHLN::Lua::FromString("return function(s) return { bogus = 1 } end", "skip.lua")
+                                               .Yes(ZHLN::Lua::Permission::Tick)
+                                               .OnError(ZHLN::Lua::ErrorPolicy::LogAndSkip)
+                                               .Bind<RecordingHost>(journal);
+
+            if (!ZHLN::Test::ExpectFalse(!layer.Start(engine))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            if (journal.errors < 1) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            // Swallowed, but still recorded: an engine-side log must be able to
+            // name the script that failed.
+            if (RecordedDetail(*engine.Errors()).find("bogus") == std::string::npos) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            if (!ZHLN::Test::ExpectFalse(!layer.Tick(engine, 0.016f))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            layer.Stop(engine);
+            return {};
+        }
+
+        auto TestCompileFailureSkipsStartAndStop() -> std::expected<void, ZHLN::ErrorCode> {
+            StubEngine             engine;
+            RecordingHost::Journal journal;
+            auto layer = ZHLN::Lua::FromString("return function(s) return {", "syntax.lua").Yes(ZHLN::Lua::Permission::Tick).Bind<RecordingHost>(journal);
+            auto res   = layer.Start(engine);
+            if (res || res.error().get<ZHLN::Lua::Error>() != ZHLN::Lua::Error::SyntaxError) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+            if (journal.starts != 0 || journal.errors != 1) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            // The syntax message, not a generic "compile failed", is what the
+            // registry must hold: it names the file and the line.
+            if (RecordedDetail(*engine.Errors()).find("syntax.lua") == std::string::npos) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            layer.Stop(engine);
+            if (journal.stops != 0) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            return {};
+        }
+
+        auto TestReloadDoesNotReenterOnStart() -> std::expected<void, ZHLN::ErrorCode> {
+            StubEngine             engine;
+            RecordingHost::Journal journal;
+            auto                   layer = ZHLN::Lua::FromString("return function(s) return { ticks = 1 } end", "reload.lua")
+                                               .Yes(ZHLN::Lua::Permission::Tick)
+                                               .Yes(ZHLN::Lua::Permission::HotReload)
+                                               .Bind<RecordingHost>(journal);
+            if (!ZHLN::Test::ExpectFalse(!layer.Start(engine)) || journal.starts != 1) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            if (!ZHLN::Test::ExpectFalse(!layer.Reload(engine))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            // A reload swaps the chunk; it must not rebuild the world.
+            if (journal.starts != 1) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            if (!ZHLN::Test::ExpectFalse(!layer.HotReloadSource(engine, "return function(s) return { ticks = 5 } end"))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            if (!ZHLN::Test::ExpectFalse(!layer.Tick(engine, 0.016f))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            if (layer.StatePtr()->ticks != 5) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            layer.Stop(engine);
+            return {};
+        }
+
+        auto TestBrokenHotReloadKeepsLastGoodChunk() -> std::expected<void, ZHLN::ErrorCode> {
+            StubEngine             engine;
+            RecordingHost::Journal journal;
+            auto                   layer = ZHLN::Lua::FromString("return function(s) return { ticks = 9 } end", "keep.lua")
+                                               .Yes(ZHLN::Lua::Permission::Tick)
+                                               .OnError(ZHLN::Lua::ErrorPolicy::LogAndSkip)
+                                               .Bind<RecordingHost>(journal);
+            if (!ZHLN::Test::ExpectFalse(!layer.Start(engine))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            // Under LogAndSkip a botched reload is swallowed -- but the previous
+            // chunk has to keep running, or one typo blanks the feature.
+            if (!ZHLN::Test::ExpectFalse(!layer.HotReloadSource(engine, "return function(s) return {{"))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            if (!ZHLN::Test::ExpectFalse(!layer.Tick(engine, 0.016f))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            if (layer.StatePtr()->ticks != 9) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            layer.Stop(engine);
+            return {};
+        }
+
+        auto TestOneShotResetAtFrameBoundary() -> std::expected<void, ZHLN::ErrorCode> {
+            // The chunk never writes `out`, so what survives is purely the
+            // layer's ResetOneShots call at the frame boundary.
+            StubEngine             engine;
+            RecordingHost::Journal journal;
+            auto                   layer = ZHLN::Lua::FromString("return function(s) return { ticks = s.ticks + 1 } end", "oneshot.lua")
+                                               .Yes(ZHLN::Lua::Permission::Tick)
+                                               .Bind<RecordingHost>(journal);
+            if (!ZHLN::Test::ExpectFalse(!layer.Start(engine))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            layer.StatePtr()->out.spawn = true;
+            if (!ZHLN::Test::ExpectFalse(!layer.Tick(engine, 0.016f))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            if (layer.StatePtr()->out.spawn) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            layer.Stop(engine);
+            return {};
+        }
+
+        auto TestReferenceAndHiddenMembersAreInvisible() -> std::expected<void, ZHLN::ErrorCode> {
+            // A reference member (an ECS handle, a borrowed object) has no
+            // value to marshal out and nothing to patch in, so it must be
+            // skipped on the way out and refused, with a detail, on the way in.
+            struct Backing {
+                int32_t value = 0;
+            };
+            struct RefState {
+                int32_t  value = 0;
+                Backing& ref;
+            };
+            Backing  backing {};
+            RefState state {.value = 3, .ref = backing};
+
+            auto read = ZHLN::Lua::Compile<RefState>("return function(s) return { value = 7 } end", "ref.lua").Build();
+            if (!ZHLN::Test::ExpectFalse(!read)) {
+                return std::unexpected(read.error());
+            }
+            auto readRes = (*read)(state);
+            if (!readRes || state.value != 7) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            // The reference stayed exactly as it was: nothing rebuilt it.
+            if (&state.ref != &backing || backing.value != 0) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+
+            auto write = ZHLN::Lua::Compile<RefState>("return function(s) return { ref = { value = 1 } } end", "refw.lua").Build();
+            if (!ZHLN::Test::ExpectFalse(!write)) {
+                return std::unexpected(write.error());
+            }
+            ZHLN::Lua::ScriptDiagnostics writeDiagnostics;
+            auto                        writeRes = (*write)(state, writeDiagnostics);
+            if (writeRes || writeRes.error().get<ZHLN::Lua::Error>() != ZHLN::Lua::Error::ReadOnlyField) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+            if (writeDiagnostics.detail.find("ref") == std::string::npos) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            return {};
+        }
+
+        auto TestHiddenMemberNeverReachesLua() -> std::expected<void, ZHLN::ErrorCode> {
+            // LuaScriptState owns `owned` behind Hidden; a script that echoes
+            // every key it can see must not find it, and one that writes it must
+            // be told the field is unknown.
+            auto echo = ZHLN::Lua::Compile<LuaScriptState>(
+                            R"lua(
+                    return function(state)
+                        local seen = false
+                        for key, _ in pairs(state) do
+                            if key == "owned" then seen = true end
+                        end
+                        return { steps = seen and 1 or 0 }
+                    end
+                )lua",
+                            "hidden.lua"
+            )
+                            .Build();
+            if (!ZHLN::Test::ExpectFalse(!echo)) {
+                return std::unexpected(echo.error());
+            }
+            LuaScriptState state;
+            if (auto res = (*echo)(state); !ZHLN::Test::ExpectFalse(!res)) {
+                return std::unexpected(res.error());
+            }
+            if (state.steps != 0 || state.owned == nullptr) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+
+            auto write = ZHLN::Lua::Compile<LuaScriptState>("return function(state) return { owned = 5 } end", "hiddenw.lua").Build();
+            if (!ZHLN::Test::ExpectFalse(!write)) {
+                return std::unexpected(write.error());
+            }
+            ZHLN::Lua::ScriptDiagnostics hiddenDiagnostics;
+            auto                        res = (*write)(state, hiddenDiagnostics);
+            if (res || res.error().get<ZHLN::Lua::Error>() != ZHLN::Lua::Error::UnknownField || hiddenDiagnostics.detail.find("owned") == std::string::npos) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+            return {};
+        }
+
+        auto TestHostedLayerMovesWithItsState() -> std::expected<void, ZHLN::ErrorCode> {
+            // App stores the layer in a shared_ptr and the tests move it around;
+            // the state the host and the layer point at has to survive the move,
+            // and so does a policy change.
+            StubEngine             engine;
+            RecordingHost::Journal journal;
+            auto                   layer =
+                ZHLN::Lua::FromString("return function(s) return { ticks = 1 } end", "move.lua").Yes(ZHLN::Lua::Permission::Tick).Bind<RecordingHost>(journal);
+            RecordingHost* host  = layer.HostPtr();
+            HostState*     state = layer.StatePtr();
+
+            auto moved = std::move(layer);
+            if (moved.HostPtr() != host || moved.StatePtr() != state) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            // A moved-from layer is inert, not a dangling borrow of storage the
+            // new layer now owns: Tick reports the load failure instead of
+            // running a chunk against someone else's state.
+            if (layer.StatePtr() != nullptr || layer.HostPtr() != nullptr) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            if (auto stale = layer.Tick(engine, 0.016f); stale || stale.error().get<ZHLN::Lua::Error>() != ZHLN::Lua::Error::ScriptLoadFailed) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+            layer.Stop(engine);
+            if (journal.starts != 0 || journal.stops != 0) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+
+            auto repolicied = std::move(moved).OnError(ZHLN::Lua::ErrorPolicy::LogAndSkip);
+            if (repolicied.HostPtr() != host || repolicied.StatePtr() != state) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            if (!ZHLN::Test::ExpectFalse(!repolicied.Start(engine))) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            repolicied.Stop(engine);
             return {};
         }
     };
