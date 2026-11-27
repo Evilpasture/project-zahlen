@@ -118,8 +118,9 @@ struct CreateConstraintPayload {
     ConstraintID constraintID;
     BodyID       b1;
     BodyID       b2;
-    ConstraintType   cType;
-    ConstraintParams params;
+    // The parameter struct names the constraint kind; the processing side
+    // std::visits it into the matching native builder.
+    ConstraintVariant params;
 };
 
 struct SetConstraintTargetPayload {

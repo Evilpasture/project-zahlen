@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <optional>
 #include <Zahlen/Core/Buffer.h>
@@ -50,37 +51,6 @@ enum class ID : uint8_t { NON_MOVING = 0, MOVING = 1 };
 namespace Physics {
 struct PhysicsWorld;
 struct ContactEvent;
-
-enum class ConstraintType : uint8_t { Fixed, Point, Hinge, Slider, Cone, Distance };
-
-struct ConstraintParams {
-    // Explicitly zero: a container does not initialise itself, so the default the
-    // old NSDMI gave this pivot is now spelled where the policy belongs.
-    ZHLN::FVec3 pivot {};
-    ZHLN::FVec3 axis {0.0f, 1.0f, 0.0f};
-    float        limitMin;
-    float        limitMax;
-    bool  hasMotor;
-    float target;
-    float frequency;
-    float damping;
-    float maxForce;
-    bool  disableCollisions;
-};
-
-struct ConstraintID {
-    uint32_t                     index;
-    uint32_t                     generation;
-    [[nodiscard]] constexpr auto Pack() const noexcept -> uint64_t {
-        return (static_cast<uint64_t>(generation) << 32) | index;
-    }
-};
-
-static_assert((std::is_trivially_default_constructible_v<ConstraintID> && std::is_trivially_copyable_v<ConstraintID>) );
-// Trivially copyable is the contract here: the struct is built at the call site
-// and handed over by value. It is no longer trivially *default* constructible,
-// because FVec3/FVec4 initialise their members -- which is the point of them.
-static_assert(std::is_trivially_copyable_v<ConstraintParams> && std::is_standard_layout_v<ConstraintParams>);
 
 struct RagdollPartParams {
     uint32_t       jointIndex;
@@ -140,6 +110,11 @@ static_assert(
 // shape at runtime holds one of these, then re-dispatches through the typed
 // CreateRigidBody<S> so each creation call still names its shape statically.
 using ShapeVariant = std::variant<Box, Sphere, Capsule, Cylinder, Plane, TriangleMesh, MeshAsset, HeightField, Compound>;
+
+// Runtime-held constraint parameters for the mailbox; creation goes through
+// the typed CreateConstraint<C> template, never through this variant directly.
+using ConstraintVariant =
+    std::variant<FixedConstraint, PointConstraint, DistanceConstraint, HingeConstraint, SliderConstraint, ConeConstraint>;
 
 auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC;
 auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize) -> JPH::ShapeRefC;
@@ -263,9 +238,16 @@ class PhysicsContext {
 
     [[nodiscard]] auto GetContactEvents() const -> std::pair<const Physics::ContactEvent*, size_t>;
 
-    auto CreateConstraint(Physics::ConstraintType type, Physics::BodyID b1, Physics::BodyID b2, const Physics::ConstraintParams& params)
-        -> Physics::ConstraintID;
-    void SetConstraintTarget(Physics::ConstraintID handle, float value);
+    // Typed constraint creation: the parameter struct names the kind, so a
+    // hinge's limits can never be fed to a slider. The mailbox re-dispatches
+    // through ConstraintVariant; no runtime type enum crosses this API.
+    template <typename C>
+    [[nodiscard]] auto CreateConstraint(Physics::BodyID b1, Physics::BodyID b2, const C& params)
+        -> Physics::TypedConstraintID<C> {
+        return Physics::TypedConstraintID<C>::From(CreateConstraintVariant(b1, b2, Physics::ConstraintVariant {params}));
+    }
+    void SetTargetAngle(Physics::TypedConstraintID<Physics::HingeConstraint> handle, ZHLN::RadF angle);
+    void SetTargetPosition(Physics::TypedConstraintID<Physics::SliderConstraint> handle, float position);
 
     [[nodiscard]] auto
         Raycast(ZHLN::DVec3 origin, ZHLN::FVec3 direction, float maxDistance = 1000.0f, Physics::BodyID ignore = {}) const -> Physics::RaycastResult;
@@ -315,6 +297,8 @@ class PhysicsContext {
   private:
     // Jolt-facing plumbing: resolve a runtime-held shape, then create the
     // body. The public template is the only door in.
+    [[nodiscard]] auto CreateConstraintVariant(Physics::BodyID b1, Physics::BodyID b2, const Physics::ConstraintVariant& params)
+        -> Physics::ConstraintID;
     [[nodiscard]] auto CreateRigidBodyFromVariant(
         const ShapeVariant& shape, DVec3 pos, FVec4 rot, Physics::MotionType motion, Physics::ObjectLayer layer,
         uint32_t materialID, uint32_t category, uint32_t mask, Physics::Activation activation, FVec3 scale

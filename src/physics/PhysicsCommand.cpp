@@ -224,7 +224,12 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                 JPH::BodyLockWrite lock2(system->GetBodyLockInterface(), id2);
 
                 if (lock1.Succeeded() && lock2.Succeeded()) {
-                    auto* joltConstraint = CreateNativeConstraint(c.cType, &lock1.GetBody(), &lock2.GetBody(), c.params);
+                    auto* joltConstraint = std::visit(
+                        [&](const auto& params) -> JPH::Constraint* {
+                            return CreateNativeConstraint(&lock1.GetBody(), &lock2.GetBody(), params);
+                        },
+                        c.params
+                    );
                     if (joltConstraint != nullptr) {
                         joltConstraint->AddRef();
                         system->AddConstraint(joltConstraint);

@@ -156,6 +156,12 @@ struct PhysicsWorld {
 static_assert(std::is_standard_layout_v<PhysicsWorld>);
 static_assert(offsetof(PhysicsWorld, sync) == 0);
 
-auto CreateNativeConstraint(ConstraintType type, JPH::Body* b1, JPH::Body* b2, const ConstraintParams& p) -> JPH::Constraint*;
+// One overload per constraint struct: the parameter type IS the kind.
+auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const FixedConstraint& p) -> JPH::Constraint*;
+auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const PointConstraint& p) -> JPH::Constraint*;
+auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const DistanceConstraint& p) -> JPH::Constraint*;
+auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const HingeConstraint& p) -> JPH::Constraint*;
+auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const SliderConstraint& p) -> JPH::Constraint*;
+auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const ConeConstraint& p) -> JPH::Constraint*;
 
 } // namespace ZHLN::Physics
