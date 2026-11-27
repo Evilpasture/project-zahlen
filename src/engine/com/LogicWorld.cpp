@@ -313,15 +313,21 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
     }
 
     [[nodiscard]] Option<Physics::DynamicBodyID> AsDynamic(Physics::BodyID body) const noexcept override {
-        return Sim().AsDynamic(body);
+        const std::optional<Physics::DynamicBodyID> found = Sim().AsDynamic(body);
+        if (!found.has_value()) return std::nullopt;
+        return *found;
     }
 
     [[nodiscard]] Option<Physics::KinematicBodyID> AsKinematic(Physics::BodyID body) const noexcept override {
-        return Sim().AsKinematic(body);
+        const std::optional<Physics::KinematicBodyID> found = Sim().AsKinematic(body);
+        if (!found.has_value()) return std::nullopt;
+        return *found;
     }
 
     [[nodiscard]] Option<Physics::CharacterID> AsCharacter(Physics::BodyID body) const noexcept override {
-        return Sim().AsCharacter(body);
+        const std::optional<Physics::CharacterID> found = Sim().AsCharacter(body);
+        if (!found.has_value()) return std::nullopt;
+        return *found;
     }
 
     void AddImpulse(Physics::DynamicBodyID body, FVec3 impulse) noexcept override {
