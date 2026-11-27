@@ -124,6 +124,7 @@ struct PhysicsWorld {
     JPH::Array<MaterialData>        materials;
     size_t                          materialCount    = 0;
     size_t                          materialCapacity = 0;
+    uint32_t                        nextMaterialID   = 1;
 
     alignas(64) mutable ZHLN::Mutex constraintMutex {};
     JPH::Array<JPH::Constraint*>    constraints;
@@ -138,6 +139,11 @@ struct PhysicsWorld {
 
     void               RegisterMaterial(uint32_t id, float friction, float restitution);
     [[nodiscard]] auto ResolveMaterial(uint32_t id) const -> MaterialData;
+    // Fingerprint upsert: identical (friction, restitution) reuses one dense
+    // id; new combinations take the next free id (0 stays the default
+    // material). The wire API only ever calls this, so fingerprint ids never
+    // collide with explicit RegisterMaterial callers.
+    [[nodiscard]] auto GetOrRegisterMaterial(float friction, float restitution) -> uint32_t;
 
     [[nodiscard]] auto AllocateConstraintID() -> ConstraintID;
     void               RemoveConstraintSlot(uint32_t slot) noexcept;
@@ -156,6 +162,12 @@ struct PhysicsWorld {
 static_assert(std::is_standard_layout_v<PhysicsWorld>);
 static_assert(offsetof(PhysicsWorld, sync) == 0);
 
-auto CreateNativeConstraint(ConstraintType type, JPH::Body* b1, JPH::Body* b2, const ConstraintParams& p) -> JPH::Constraint*;
+// One overload per constraint struct: the parameter type IS the kind.
+auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const FixedConstraint& p) -> JPH::Constraint*;
+auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const PointConstraint& p) -> JPH::Constraint*;
+auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const DistanceConstraint& p) -> JPH::Constraint*;
+auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const HingeConstraint& p) -> JPH::Constraint*;
+auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const SliderConstraint& p) -> JPH::Constraint*;
+auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const ConeConstraint& p) -> JPH::Constraint*;
 
 } // namespace ZHLN::Physics

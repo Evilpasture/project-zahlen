@@ -3,6 +3,7 @@
 
 #include "PerfBaseline.hpp"
 #include "TestsFramework.hpp"
+#include <UI/GUI.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/ILogicWorld.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
@@ -12,7 +13,6 @@
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Clock.hpp>
-#include <UI/GUI.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Physics/PhysicsValues.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -34,7 +34,8 @@ struct PerformanceTestSuite {
             }
             uint64_t sum = 0;
             for (uint64_t i = 0; i < 4096; ++i) {
-                if (auto v = map.Find(i * 1315423911ull)) sum += *v;
+                if (auto v = map.Find(i * 1315423911ull))
+                    sum += *v;
             }
             ZHLN::Test::ExpectEq(sum, (4095ull * 4096ull) / 2ull);
             return {};
@@ -56,7 +57,9 @@ struct PerformanceTestSuite {
             auto& ents  = *world.Entities();
             auto& sim   = *world.Simulation();
 
-            (void)sim.CreateBoxBody({50.0f, 0.5f, 50.0f}, {.position = {0.0, -0.5, 0.0}, .motionType = ZHLN::Physics::MotionType::Static});
+            (void) sim.CreateStaticBodyRaw(
+                ZHLN::COM::InChain(ZHLN::Physics::Box {.halfExtents = {50.0f, 0.5f, 50.0f}}, ZHLN::Physics::StaticBody {.position = {0.0, -0.5, 0.0}})
+            );
             std::vector<ZHLN::Entity> spawned;
             spawned.reserve(128);
             for (uint32_t i = 0; i < 128; ++i) {

@@ -20,6 +20,7 @@
 #include <optional>
 #include <span>
 #include <type_traits>
+#include <variant>
 #include <utility>
 #include <vector>
 
@@ -35,10 +36,39 @@ struct ModelNode {
     bool       hasMesh        = false;
 };
 
+// Prefab-owned collider storage. Geometry and children live with the prefab;
+// body creation borrows a wire view (TriangleMesh / Compound spans) into them,
+// so a spawn never copies the collision data.
+struct OwnedMesh {
+    std::shared_ptr<const Physics::MeshGeometry> geometry;
+};
+
+struct OwnedCompound {
+    // One variant vector in insertion order -- the order a spawn stamps into
+    // the chain, which is the compound's SubShapeID order.
+    std::vector<Physics::CompoundChild> children;
+    // Mesh children only borrow spans into their source geometry; the owners
+    // keep those snapshots alive for as long as the compound does.
+    std::vector<std::shared_ptr<const Physics::MeshGeometry>> meshOwners;
+
+    // Stamps the children into a caller-owned node scratch; the returned
+    // Compound views both that scratch and `children`, so both must outlive
+    // the body-creation call.
+    [[nodiscard]] auto View(std::vector<COM::ChainInNode>& scratch) const -> Physics::Compound {
+        return Physics::StampCompoundNodes(children, scratch);
+    }
+};
+
+// What a prefab part can hold as a collider: one wire primitive, owned mesh
+// geometry, or an owned compound. std::monostate means "no collider".
+using ModelCollider = std::variant<
+    std::monostate, Physics::Box, Physics::Sphere, Physics::Capsule, Physics::Cylinder, Physics::Plane,
+    Physics::HeightField, OwnedMesh, OwnedCompound>;
+
 // Importer-owned collision data survives the temporary import buffers and is
 // shared when model parts share a source primitive.
 [[nodiscard]] inline auto MakePrefabMeshCollider(std::span<const VertexPosition> vertices, std::span<const uint32_t> indices)
-    -> std::optional<Physics::AnyShape> {
+    -> std::optional<ModelCollider> {
     if (vertices.size() < 3 || indices.size() < 3 || indices.size() % 3 != 0) return {};
     bool nondegenerate = false;
     for (size_t i = 0; i < indices.size(); i += 3) {
@@ -50,24 +80,52 @@ struct ModelNode {
     data->vertices.reserve(vertices.size());
     for (const auto& v: vertices) data->vertices.push_back({v.position[0], v.position[1], v.position[2]});
     data->indices.assign(indices.begin(), indices.end());
-    return Physics::AnyShape(Physics::Shape<Physics::Mesh>(std::move(data)));
+    return OwnedMesh {std::move(data)};
 }
 
-[[nodiscard]] inline auto MakePrefabBoxCollider(FVec3 halfExtents, FVec3 center = {}) -> Physics::AnyShape {
-    Physics::Shape<Physics::Compound> compound;
-    compound.Add(Physics::Shape<Physics::Box>(halfExtents), center);
-    return Physics::AnyShape(std::move(compound));
+[[nodiscard]] inline auto MakePrefabBoxCollider(FVec3 halfExtents, FVec3 center = {}) -> ModelCollider {
+    if (center == FVec3 {}) return Physics::Box {halfExtents};
+    OwnedCompound compound;
+    compound.children.push_back(Physics::Placed<Physics::Box> {Physics::Box {halfExtents}, center});
+    return compound;
 }
 
-inline void AppendPrefabCollider(Physics::Shape<Physics::Compound>& compound, const Physics::AnyShape& source) {
-    std::visit([&](const auto& shape) {
-        using S = std::remove_cvref_t<decltype(shape)>;
-        if constexpr (std::is_same_v<S, Physics::Shape<Physics::Compound>>) {
-            compound.children.insert(compound.children.end(), shape.children.begin(), shape.children.end());
-        } else {
-            compound.Add(shape);
-        }
-    }, source);
+inline void AppendPrefabCollider(OwnedCompound& compound, const ModelCollider& source) {
+    std::visit(
+        [&](const auto& shape) {
+            using S = std::remove_cvref_t<decltype(shape)>;
+            if constexpr (std::is_same_v<S, OwnedCompound>) {
+                compound.children.insert(compound.children.end(), shape.children.begin(), shape.children.end());
+                compound.meshOwners.insert(compound.meshOwners.end(), shape.meshOwners.begin(), shape.meshOwners.end());
+            } else if constexpr (std::is_same_v<S, OwnedMesh>) {
+                if (shape.geometry) {
+                    compound.meshOwners.push_back(shape.geometry);
+                    compound.children.push_back(Physics::Placed<Physics::TriangleMesh> {
+                        Physics::TriangleMesh {shape.geometry->vertices, shape.geometry->indices}, {}});
+                } else {
+                    // An unresolvable snapshot must keep failing the whole
+                    // compound, exactly like the old null-mesh child.
+                    compound.children.push_back(
+                        Physics::Placed<Physics::TriangleMesh> {Physics::TriangleMesh {}, {}});
+                }
+            } else if constexpr (std::is_same_v<S, Physics::Box>) {
+                compound.children.push_back(Physics::Placed<Physics::Box> {shape});
+            } else if constexpr (std::is_same_v<S, Physics::Sphere>) {
+                compound.children.push_back(Physics::Placed<Physics::Sphere> {shape});
+            } else if constexpr (std::is_same_v<S, Physics::Capsule>) {
+                compound.children.push_back(Physics::Placed<Physics::Capsule> {shape});
+            } else if constexpr (std::is_same_v<S, Physics::Cylinder>) {
+                compound.children.push_back(Physics::Placed<Physics::Cylinder> {shape});
+            } else if constexpr (std::is_same_v<S, Physics::Plane>) {
+                compound.children.push_back(Physics::Placed<Physics::Plane> {shape});
+            } else if constexpr (std::is_same_v<S, Physics::HeightField>) {
+                // Height fields cannot nest inside a compound; treat the
+                // same as "nothing to append" (the collider variant had no
+                // height-field alternative at all).
+            }
+        },
+        source
+    );
 }
 
 struct ModelPart {
@@ -94,8 +152,8 @@ struct ModelPart {
     ZHLN::FVec3 localMin       = {0.0f, 0.0f, 0.0f};
     ZHLN::FVec3 localMax       = {0.0f, 0.0f, 0.0f};
 
-    std::optional<Physics::AnyShape> meshCollider;
-    std::optional<Physics::AnyShape> boxCollider;
+    std::optional<ModelCollider> meshCollider;
+    std::optional<ModelCollider> boxCollider;
 
     // Background-layer parts (Source's 3D-skybox scenery) carry
     // DrawFlags::Background so their instances composite behind the main

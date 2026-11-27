@@ -43,8 +43,9 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                     settings.mRestitution = mat.restitution;
 
                     if (c.motion == JPH::EMotionType::Dynamic) {
-                        settings.mAllowSleeping = true;
-                        settings.mMotionQuality = JPH::EMotionQuality::LinearCast;
+                        settings.mAllowSleeping  = true;
+                        settings.mMotionQuality  = JPH::EMotionQuality::LinearCast;
+                        settings.mLinearVelocity = JPH::Vec3(c.vx, c.vy, c.vz);
                     }
 
                     id = bodyInterface->CreateAndAddBody(
@@ -205,16 +206,6 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                 break;
             }
 
-            case CommandType::AddImpulseAtPosition: {
-                const auto&       c  = cmd.payload.addImpulseAtPos;
-                const JPH::BodyID id = GetBodyID(*this, c.bodyID);
-                if (!id.IsInvalid()) {
-                    bodyInterface->AddImpulse(id, JPH::Vec3(c.ix, c.iy, c.iz), JPH::RVec3(c.px, c.py, c.pz));
-                    bodyInterface->ActivateBody(id);
-                }
-                break;
-            }
-
             case CommandType::CreateConstraint: {
                 const auto&       c   = cmd.payload.createConstraint;
                 const JPH::BodyID id1 = GetBodyID(*this, c.b1);
@@ -224,7 +215,12 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                 JPH::BodyLockWrite lock2(system->GetBodyLockInterface(), id2);
 
                 if (lock1.Succeeded() && lock2.Succeeded()) {
-                    auto* joltConstraint = CreateNativeConstraint(c.cType, &lock1.GetBody(), &lock2.GetBody(), c.params);
+                    auto* joltConstraint = std::visit(
+                        [&](const auto& params) -> JPH::Constraint* {
+                            return CreateNativeConstraint(&lock1.GetBody(), &lock2.GetBody(), params);
+                        },
+                        c.params
+                    );
                     if (joltConstraint != nullptr) {
                         joltConstraint->AddRef();
                         system->AddConstraint(joltConstraint);
@@ -232,19 +228,6 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                         const uint32_t slot    = c.constraintID.index;
                         constraints[slot]      = joltConstraint;
                         constraintStates[slot] = SlotState::Alive;
-                    }
-                }
-                break;
-            }
-
-            case CommandType::DestroyConstraint: {
-                const uint32_t slot = cmd.payload.constraintID.index;
-                if (slot < constraintCapacity && constraintGenerations[slot].load(std::memory_order::acquire) == cmd.payload.constraintID.generation) {
-                    if (constraints[slot] != nullptr) {
-                        system->RemoveConstraint(constraints[slot]);
-                        constraints[slot]->Release();
-                        constraints[slot] = nullptr;
-                        RemoveConstraintSlot(slot);
                     }
                 }
                 break;

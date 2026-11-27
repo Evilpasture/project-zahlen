@@ -1941,7 +1941,12 @@ void ProceduralAnimation::Evaluate(
                                            footAttachmentsEnabled;
         const bool locomotionSyncEnabled = animator && tracks && tracks->synchronizeToStrideWheel;
 
-        const FVec3 velocityWorld = (physicsComponent && physics != nullptr) ? physics->CharacterVelocity(physicsComponent->physicsID) : FVec3::Zero();
+        FVec3       velocityWorld = FVec3::Zero();
+        if (physicsComponent && physics != nullptr) {
+            if (const auto character = physics->AsCharacter(physicsComponent->physicsID)) {
+                velocityWorld = physics->CharacterVelocity(*character);
+            }
+        }
         const Quat  entityRotation {transform->rotation};
         const Quat  rootRotation    = entityRotation.Normalized();
         const FVec3 velocityLocal   = rootRotation.Inversed() * velocityWorld;

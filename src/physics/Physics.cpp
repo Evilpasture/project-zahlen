@@ -358,136 +358,59 @@ void PhysicsContext::OptimizeBroadphase() {
     _impl->physicsSystem.OptimizeBroadPhase();
 }
 
-auto PhysicsContext::CreateRigidBody(
-    const Physics::AnyShape& shape,
-    DVec3                    pos,
-    FVec4                    rot,
-    Physics::MotionType      motion,
-    Physics::ObjectLayer     layer,
-    uint32_t                 materialID,
-    uint32_t                 category,
-    uint32_t                 mask,
-    Physics::Activation      activation,
-    FVec3                    scale
-) -> Physics::BodyID {
-    auto pinned = _impl->shapeCache.Resolve(shape);
-    if (!pinned)
-        return Physics::BodyID::Null();
+auto PhysicsContext::ResolveShape(const Physics::ShapeVariant& shape, FVec3 scale) -> JPH::ShapeRefC {
+    JPH::ShapeRefC pinned = std::visit([this](const auto& s) -> JPH::ShapeRefC { return _impl->shapeCache.Resolve(s); }, shape);
+    if (pinned == nullptr) {
+        return nullptr;
+    }
     const JPH::Vec3 joltScale(scale.x, scale.y, scale.z);
     if (!joltScale.IsClose(JPH::Vec3::sReplicate(1.0f), 1e-5f)) {
         JPH::ScaledShapeSettings settings(pinned, joltScale);
-        const auto               result = settings.Create();
+        const JPH::Shape::ShapeResult result = settings.Create();
         if (!result.IsValid())
-            return Physics::BodyID::Null();
+            return nullptr;
         pinned = result.Get();
     }
-    JPH::EMotionType jm;
-    switch (motion) {
-        case Physics::MotionType::Static:
-            jm = JPH::EMotionType::Static;
-            break;
-        case Physics::MotionType::Kinematic:
-            jm = JPH::EMotionType::Kinematic;
-            break;
-        case Physics::MotionType::Dynamic:
-            jm = JPH::EMotionType::Dynamic;
-            break;
-        default:
-            return Physics::BodyID::Null();
-    }
-    Layers::ID jl;
-    switch (layer) {
-        case Physics::ObjectLayer::NonMoving:
-            jl = Layers::ID::NON_MOVING;
-            break;
-        case Physics::ObjectLayer::Moving:
-            jl = Layers::ID::MOVING;
-            break;
-        default:
-            return Physics::BodyID::Null();
-    }
-    JPH::EActivation ja;
-    switch (activation) {
-        case Physics::Activation::Activate:
-            ja = JPH::EActivation::Activate;
-            break;
-        case Physics::Activation::DontActivate:
-            ja = JPH::EActivation::DontActivate;
-            break;
-        default:
-            return Physics::BodyID::Null();
-    }
-    return CreateRigidBody(pinned, pos, rot, jm, jl, materialID, category, mask, ja);
+    return pinned;
 }
 
-auto PhysicsContext::GetOrCreateShape(Physics::ShapeType type, float p1, float p2, float p3, float p4) -> JPH::ShapeRefC {
-    return _impl->shapeCache.GetOrCreate(type, p1, p2, p3, p4);
-}
-
-auto PhysicsContext::CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC {
-    return Physics::CreateMeshShape(vertices, vertexCount, indices, indexCount);
-}
-
-auto PhysicsContext::CreateTranslatedShape(const JPH::ShapeRefC& shape, FVec3 offset) -> JPH::ShapeRefC {
-    if (!shape)
-        return nullptr;
-    return new JPH::RotatedTranslatedShape(JPH::Vec3(offset.x, offset.y, offset.z), JPH::Quat::sIdentity(), shape);
-}
-
-auto PhysicsContext::CreateCompoundShape(const JPH::ShapeRefC& first, const JPH::ShapeRefC& second) -> JPH::ShapeRefC {
-    if (!first || !second)
-        return nullptr;
-    JPH::StaticCompoundShapeSettings settings;
-    settings.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), first);
-    settings.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), second);
-    const auto result = settings.Create();
-    return result.IsValid() ? result.Get() : nullptr;
-}
-
-auto PhysicsContext::CreateRigidBody(
-    const JPH::ShapeRefC& shape,
-    ZHLN::DVec3           pos,
-    ZHLN::FVec4           rot,
-    JPH::EMotionType      motion,
-    Layers::ID            layer,
-    uint32_t              materialID,
-    uint32_t              category,
-    uint32_t              mask,
-    JPH::EActivation      activation
-) -> Physics::BodyID {
-    if (shape == nullptr) {
+auto PhysicsContext::CreateRigidBodyCore(const JPH::ShapeRefC& pinnedShape, DVec3 pos, FVec4 rot, JPH::EMotionType jm,
+                                          Layers::ID jl, JPH::EActivation activation, FVec3 velocity, uint32_t materialID,
+                                          uint32_t category, uint32_t mask) -> Physics::BodyID {
+    if (pinnedShape == nullptr) {
         return Physics::BodyID::Null();
     }
 
     auto&                 world = _impl->world;
     auto&                 bt    = world.bodyTable;
     const Physics::BodyID handle =
-        bt.ReserveSlot(Physics::SlotState::PendingCreateRigid, motion, JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat(rot.x, rot.y, rot.z, rot.w));
+        bt.ReserveSlot(Physics::SlotState::PendingCreateRigid, jm, JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat(rot.x, rot.y, rot.z, rot.w));
 
     uint32_t precreatedBodyID = JPH::BodyID::cInvalidBodyID;
     if (world.EnterIdleJoltMutation()) {
         const Physics::MaterialData mat = world.ResolveMaterial(materialID);
         JPH::BodyCreationSettings   settings(
-            shape, JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat(rot.x, rot.y, rot.z, rot.w), motion, static_cast<JPH::ObjectLayer>(layer)
+            pinnedShape, JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat(rot.x, rot.y, rot.z, rot.w), jm, static_cast<JPH::ObjectLayer>(jl)
         );
         settings.mUserData    = handle.Pack();
         settings.mFriction    = mat.friction;
         settings.mRestitution = mat.restitution;
 
-        if (motion == JPH::EMotionType::Dynamic) {
+        if (jm == JPH::EMotionType::Dynamic) {
             settings.mAllowSleeping = true;
             settings.mMotionQuality = JPH::EMotionQuality::LinearCast;
+            settings.mLinearVelocity = JPH::Vec3(velocity.x, velocity.y, velocity.z);
         }
 
         const JPH::BodyID id =
-            world.bodyInterface->CreateAndAddBody(settings, (motion == JPH::EMotionType::Static) ? JPH::EActivation::DontActivate : activation);
+            world.bodyInterface->CreateAndAddBody(settings, (jm == JPH::EMotionType::Static) ? JPH::EActivation::DontActivate : activation);
         precreatedBodyID = id.GetIndexAndSequenceNumber();
 
         bt.slotBodyIDs[handle.index].store(precreatedBodyID, std::memory_order::release);
         bt.slotMaterialIDs[handle.index].store(materialID, std::memory_order::relaxed);
 
         const uint32_t jIdx = precreatedBodyID & JPH::BodyID::cMaxBodyIndex;
-        ZHLN::Assert(jIdx < bt.joltIndexToBodyID.size(), "PhysicsContext::CreateRigidBody: jIdx ({}) exceeds joltIndexToBodyID!", jIdx);
+        ZHLN::Assert(jIdx < bt.joltIndexToBodyID.size(), "PhysicsContext::CreateRigidBodyCore: jIdx ({}) exceeds joltIndexToBodyID!", jIdx);
         bt.joltIndexToBodyID[jIdx].store(handle.Pack(), std::memory_order::release);
 
         world.LeaveIdleJoltMutation();
@@ -495,7 +418,7 @@ auto PhysicsContext::CreateRigidBody(
 
     Physics::Command cmd {};
     cmd.type                = Physics::CommandType::CreateRigidBody;
-    cmd.shape               = shape;
+    cmd.shape               = pinnedShape;
     cmd.payload.createRigid = Physics::CreateRigidPayload {
         .bodyID           = handle,
         .px               = static_cast<JPH::Real>(pos.x),
@@ -505,16 +428,75 @@ auto PhysicsContext::CreateRigidBody(
         .ry               = rot.y,
         .rz               = rot.z,
         .rw               = rot.w,
+        .vx               = velocity.x,
+        .vy               = velocity.y,
+        .vz               = velocity.z,
         .precreatedBodyID = precreatedBodyID,
         .materialID       = materialID,
         .category         = category,
         .mask             = mask,
-        .motion           = motion,
-        .layer            = layer,
+        .motion           = jm,
+        .layer            = jl,
         .activation       = activation,
     };
     world.mailbox.Enqueue(std::move(cmd));
     return handle;
+}
+
+auto PhysicsContext::CreateBodyImpl(const Physics::ShapeVariant& shape, const Physics::StaticBody& role, const Physics::BodyModifiers& mods)
+    -> Physics::StaticBodyID {
+    const uint32_t materialID = mods.hasSurface ? static_cast<uint32_t>(RegisterMaterial(mods.surface)) : 0u;
+    const auto     layer = mods.movingBroadphase ? Layers::ID::MOVING : Layers::ID::NON_MOVING;
+    const JPH::ShapeRefC pinned = ResolveShape(shape, role.scale);
+    const Physics::BodyID body =
+        CreateRigidBodyCore(pinned, role.position, FVec4 {role.rotation.x, role.rotation.y, role.rotation.z, role.rotation.w},
+                            JPH::EMotionType::Static, layer, JPH::EActivation::DontActivate, FVec3::Zero(), materialID,
+                            mods.filter.category, mods.filter.mask);
+    return Physics::StaticBodyID::From(body);
+}
+
+auto PhysicsContext::CreateBodyImpl(const Physics::ShapeVariant& shape, const Physics::KinematicBody& role, const Physics::BodyModifiers& mods)
+    -> Physics::KinematicBodyID {
+    const uint32_t materialID = mods.hasSurface ? static_cast<uint32_t>(RegisterMaterial(mods.surface)) : 0u;
+    const JPH::ShapeRefC pinned = ResolveShape(shape, role.scale);
+    const Physics::BodyID body =
+        CreateRigidBodyCore(pinned, role.position, FVec4 {role.rotation.x, role.rotation.y, role.rotation.z, role.rotation.w},
+                            JPH::EMotionType::Kinematic, Layers::ID::MOVING, JPH::EActivation::DontActivate, FVec3::Zero(),
+                            materialID, mods.filter.category, mods.filter.mask);
+    return Physics::KinematicBodyID::From(body);
+}
+
+auto PhysicsContext::CreateBodyImpl(const Physics::ShapeVariant& shape, const Physics::DynamicBody& role, const Physics::BodyModifiers& mods)
+    -> Physics::DynamicBodyID {
+    const uint32_t materialID = mods.hasSurface ? static_cast<uint32_t>(RegisterMaterial(mods.surface)) : 0u;
+    const JPH::EActivation activation = role.startAsleep ? JPH::EActivation::DontActivate : JPH::EActivation::Activate;
+    const JPH::ShapeRefC pinned = ResolveShape(shape, role.scale);
+    const Physics::BodyID body =
+        CreateRigidBodyCore(pinned, role.position, FVec4 {role.rotation.x, role.rotation.y, role.rotation.z, role.rotation.w},
+                            JPH::EMotionType::Dynamic, Layers::ID::MOVING, activation, role.velocity, materialID,
+                            mods.filter.category, mods.filter.mask);
+    return Physics::DynamicBodyID::From(body);
+}
+
+auto PhysicsContext::CreateBodyImpl(const Physics::ShapeVariant& shape, const Physics::CharacterBody& role,
+                                     const Physics::BodyModifiers& mods) -> Physics::CharacterID {
+    const JPH::ShapeRefC charShape =
+        std::visit([this](const auto& variant) -> JPH::ShapeRefC { return _impl->shapeCache.Resolve(variant); }, shape);
+    if (charShape == nullptr) {
+        return Physics::CharacterID::Null();
+    }
+    // Jolt's plane is X . Normal + Constant = 0, so the supporting half-space
+    // is n.p + c <= 0. An explicit CharacterBody::supportingVolume ships its
+    // components verbatim; absent, the lower half of the resolved shape's
+    // bounds (contacts up to the bounds' mid-height count as floor support).
+    Physics::Plane supportingVolume {};
+    if (role.supportingVolume.HasValue()) {
+        supportingVolume = role.supportingVolume.value;
+    } else {
+        const JPH::AABox bounds = charShape->GetLocalBounds();
+        supportingVolume        = Physics::Plane {.constant = -(bounds.mMin.GetY() + bounds.mMax.GetY()) * 0.5F};
+    }
+    return Physics::CharacterID::From(CreateCharacterBody(charShape, supportingVolume, role, mods));
 }
 
 namespace Physics {
@@ -585,113 +567,62 @@ auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSi
     return result.HasError() ? nullptr : result.Get();
 }
 
-auto CreateDualShape(const DualShapeConfig& config) -> JPH::ShapeRefC {
-    JPH::StaticCompoundShapeSettings compound;
-
-    const JPH::ShapeRefC lifterShape = new JPH::SphereShape(config.lifterRadius);
-    compound.AddShape(JPH::Vec3(0.0f, config.GetLifterOffsetY(), 0.0f), JPH::Quat::sIdentity(), lifterShape);
-
-    const float          cylinderHalfHeight = std::max(0.001f, config.bumperRadiusY - config.bumperRadiusXZ);
-    const JPH::ShapeRefC bumperShape        = (config.bumperRadiusY > config.bumperRadiusXZ) ?
-                                                  static_cast<JPH::ShapeRefC>(new JPH::CapsuleShape(cylinderHalfHeight, config.bumperRadiusXZ)) :
-                                                  static_cast<JPH::ShapeRefC>(new JPH::SphereShape(config.bumperRadiusXZ));
-
-    compound.AddShape(JPH::Vec3(0.0f, config.GetBumperOffsetY(), 0.0f), JPH::Quat::sIdentity(), bumperShape);
-
-    const auto res = compound.Create();
-    return res.HasError() ? nullptr : res.Get();
-}
-
 } // namespace Physics
 
-auto PhysicsContext::CreateMeshBody(
-    const VertexPosition* vertices,
-    uint32_t              vertexCount,
-    const uint32_t*       indices,
-    uint32_t              indexCount,
-    ZHLN::DVec3           pos,
-    ZHLN::FVec4           rot,
-    uint32_t              category,
-    uint32_t              mask
-) -> Physics::BodyID {
-    const JPH::ShapeRefC shape = Physics::CreateMeshShape(vertices, vertexCount, indices, indexCount);
-    if (shape == nullptr) {
-        return Physics::BodyID::Null();
-    }
-    return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, category, mask);
-}
-
-auto PhysicsContext::CreateCustomCharacter(const Physics::CharacterCreateDesc& desc) -> Physics::BodyID {
-    Physics::CharacterParams params {};
-    if (desc.useCustomCapsule && desc.capsuleRadius > 0.0F && desc.capsuleHalfHeight > 0.0F) {
-        params.shape = GetOrCreateShape(Physics::ShapeType::Capsule, desc.capsuleRadius, desc.capsuleHalfHeight);
-    }
-    params.maxSlopeAngle            = desc.maxSlopeRadians;
-    params.maxStrength              = desc.maxStrength;
-    params.characterPadding         = desc.characterPadding;
-    params.penetrationRecoverySpeed = desc.penetrationRecoverySpeed;
-    params.category                 = desc.category;
-    params.mask                     = desc.mask;
-    return CreateCharacter(desc.position, params);
-}
-
-auto PhysicsContext::CharacterVelocity(Physics::BodyID handle) const -> ZHLN::FVec3 {
+auto PhysicsContext::CharacterVelocity(Physics::CharacterID handle) const -> ZHLN::FVec3 {
     return Physics::FromJoltVector(GetCharacterVelocity(handle));
 }
 
-auto PhysicsContext::CreateCharacter(ZHLN::DVec3 position, const Physics::CharacterParams& params) -> Physics::BodyID {
+auto PhysicsContext::CreateCharacterBody(const JPH::ShapeRefC& pinnedShape, const Physics::Plane& supportingVolume,
+                                         const Physics::CharacterBody& role,
+                                         const Physics::BodyModifiers& mods) -> Physics::BodyID {
     auto* impl  = _impl.get();
     auto& world = impl->world;
 
-    JPH::ShapeRefC charShape = params.shape;
-    if (charShape == nullptr) {
-        charShape = GetOrCreateShape(Physics::ShapeType::Capsule, 0.5f, 0.3f);
-    }
-    if (charShape == nullptr) {
+    if (pinnedShape == nullptr) {
         return Physics::BodyID::Null();
     }
 
     // Cache centre-to-feet ground offset once at creation so gameplay never
     // queries Jolt shape bounds on hot steering ticks.
-    const float groundOffset = charShape->GetLocalBounds().mMax.GetY();
+    const float groundOffset = pinnedShape->GetLocalBounds().mMax.GetY();
 
     const Physics::BodyID handle = world.bodyTable.ReserveSlot(
-        Physics::SlotState::PendingCreateChar, JPH::EMotionType::Kinematic, JPH::RVec3(position.x, position.y, position.z), JPH::Quat::sIdentity()
+        Physics::SlotState::PendingCreateChar, JPH::EMotionType::Kinematic,
+        JPH::RVec3(role.position.x, role.position.y, role.position.z), JPH::Quat::sIdentity()
     );
     impl->characters.InitReservedSlot(handle, groundOffset);
 
-    const JPH::Vec3  planeNormal   = params.supportingVolume.GetNormal();
-    const float      planeConstant = params.supportingVolume.GetConstant();
     Physics::Command cmd {};
     cmd.type               = Physics::CommandType::CreateCharacter;
-    cmd.shape              = std::move(charShape);
+    cmd.shape              = pinnedShape;
     cmd.payload.createChar = Physics::CreateCharacterPayload {
         .bodyID                   = handle,
-        .px                       = static_cast<JPH::Real>(position.x),
-        .py                       = static_cast<JPH::Real>(position.y),
-        .pz                       = static_cast<JPH::Real>(position.z),
-        .maxSlopeAngle            = params.maxSlopeAngle,
-        .maxStrength              = params.maxStrength,
-        .characterPadding         = params.characterPadding,
-        .penetrationRecoverySpeed = params.penetrationRecoverySpeed,
-        .planeNx                  = planeNormal.GetX(),
-        .planeNy                  = planeNormal.GetY(),
-        .planeNz                  = planeNormal.GetZ(),
-        .planeC                   = planeConstant,
-        .category                 = params.category,
-        .mask                     = params.mask,
+        .px                       = static_cast<JPH::Real>(role.position.x),
+        .py                       = static_cast<JPH::Real>(role.position.y),
+        .pz                       = static_cast<JPH::Real>(role.position.z),
+        .maxSlopeAngle            = role.maxSlopeAngle.value,
+        .maxStrength              = role.maxStrength,
+        .characterPadding         = role.padding,
+        .penetrationRecoverySpeed = role.penetrationRecoverySpeed,
+        .planeNx                  = supportingVolume.normal.x,
+        .planeNy                  = supportingVolume.normal.y,
+        .planeNz                  = supportingVolume.normal.z,
+        .planeC                   = supportingVolume.constant,
+        .category                 = mods.filter.category,
+        .mask                     = mods.filter.mask,
     };
     world.mailbox.Enqueue(std::move(cmd));
     return handle;
 }
 
-void PhysicsContext::SetCollisionFilter(Physics::BodyID handle, uint32_t category, uint32_t mask) {
+void PhysicsContext::SetCollisionFilter(Physics::BodyID handle, Physics::CollisionFilter filter) {
     Physics::Command cmd {};
     cmd.type              = Physics::CommandType::SetCollisionFilter;
     cmd.payload.setFilter = Physics::SetFilterPayload {
         .bodyID   = handle,
-        .category = category,
-        .mask     = mask,
+        .category = filter.category,
+        .mask     = filter.mask,
     };
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
@@ -725,7 +656,7 @@ auto PhysicsContext::GetDebugDrawData(bool drawShapes, bool drawConstraints, boo
     };
 }
 
-void PhysicsContext::SetCharacterVelocity(Physics::BodyID handle, ZHLN::FVec3 velocity) {
+void PhysicsContext::SetVelocity(Physics::CharacterID handle, ZHLN::FVec3 velocity) {
     if (!_impl->characters.RecordDesiredVelocity(handle, JPH::Vec3(velocity.x, velocity.y, velocity.z))) {
         return;
     }
@@ -740,7 +671,7 @@ void PhysicsContext::SetCharacterVelocity(Physics::BodyID handle, ZHLN::FVec3 ve
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::SetCharacterPosition(Physics::BodyID handle, ZHLN::DVec3 position) {
+void PhysicsContext::SetPose(Physics::CharacterID handle, ZHLN::DVec3 position) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -756,7 +687,7 @@ void PhysicsContext::SetCharacterPosition(Physics::BodyID handle, ZHLN::DVec3 po
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::SetKinematicPose(Physics::BodyID handle, ZHLN::DVec3 position, ZHLN::FVec4 rotation) {
+void PhysicsContext::SetPose(Physics::KinematicBodyID handle, ZHLN::DVec3 position, ZHLN::FVec4 rotation) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -776,7 +707,7 @@ void PhysicsContext::SetKinematicPose(Physics::BodyID handle, ZHLN::DVec3 positi
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::SetLinearVelocity(Physics::BodyID handle, ZHLN::FVec3 velocity) {
+void PhysicsContext::SetVelocity(Physics::DynamicBodyID handle, ZHLN::FVec3 velocity) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -792,15 +723,15 @@ void PhysicsContext::SetLinearVelocity(Physics::BodyID handle, ZHLN::FVec3 veloc
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-auto PhysicsContext::GetCharacterVelocity(Physics::BodyID handle) const -> JPH::Vec3 {
+auto PhysicsContext::GetCharacterVelocity(Physics::CharacterID handle) const -> JPH::Vec3 {
     return _impl->characters.GetVelocity(handle);
 }
 
-auto PhysicsContext::GetCharacterGroundOffset(Physics::BodyID handle) const -> float {
+auto PhysicsContext::GetCharacterGroundOffset(Physics::CharacterID handle) const -> float {
     return _impl->characters.GetGroundOffset(handle);
 }
 
-auto PhysicsContext::IsCharacterOnGround(Physics::BodyID handle) const -> bool {
+auto PhysicsContext::IsCharacterOnGround(Physics::CharacterID handle) const -> bool {
     const auto&    world = _impl->world;
     const auto&    bt    = world.bodyTable;
     const uint32_t slot  = handle.index;
@@ -832,6 +763,54 @@ auto PhysicsContext::IsBodyDynamic(Physics::BodyID handle) const -> bool {
     }
 
     return bt.slotMotionTypes[slot].load(std::memory_order::acquire) == JPH::EMotionType::Dynamic;
+}
+
+namespace {
+
+// Shared slot proof for the As* narrowers: the generation must match and the
+// state must be one a rigid body occupies (alive or queued for creation).
+[[nodiscard]] auto RigidSlotValid(const Physics::BodyTable& bt, Physics::BodyID body) noexcept -> bool {
+    if (body.index >= bt.slotCapacity || bt.generations[body.index].load(std::memory_order::acquire) != body.generation) {
+        return false;
+    }
+    const Physics::SlotState state = bt.LoadSlotState(body.index);
+    return state == Physics::SlotState::Alive || state == Physics::SlotState::PendingCreateRigid;
+}
+
+} // namespace
+
+auto PhysicsContext::AsDynamic(Physics::BodyID body) const noexcept -> std::optional<Physics::DynamicBodyID> {
+    const auto& bt = _impl->world.bodyTable;
+    if (!RigidSlotValid(bt, body)) {
+        return std::nullopt;
+    }
+    if (bt.slotMotionTypes[body.index].load(std::memory_order::acquire) != JPH::EMotionType::Dynamic) {
+        return std::nullopt;
+    }
+    return Physics::DynamicBodyID::From(body);
+}
+
+auto PhysicsContext::AsKinematic(Physics::BodyID body) const noexcept -> std::optional<Physics::KinematicBodyID> {
+    const auto& bt = _impl->world.bodyTable;
+    if (!RigidSlotValid(bt, body)) {
+        return std::nullopt;
+    }
+    if (bt.slotMotionTypes[body.index].load(std::memory_order::acquire) != JPH::EMotionType::Kinematic) {
+        return std::nullopt;
+    }
+    return Physics::KinematicBodyID::From(body);
+}
+
+auto PhysicsContext::AsCharacter(Physics::BodyID body) const noexcept -> std::optional<Physics::CharacterID> {
+    const auto& bt = _impl->world.bodyTable;
+    if (body.index >= bt.slotCapacity || bt.generations[body.index].load(std::memory_order::acquire) != body.generation) {
+        return std::nullopt;
+    }
+    const Physics::SlotState state = bt.LoadSlotState(body.index);
+    if (state != Physics::SlotState::Character && state != Physics::SlotState::PendingCreateChar) {
+        return std::nullopt;
+    }
+    return Physics::CharacterID::From(body);
 }
 
 auto PhysicsContext::GetPositionBuffer() const -> BufferView {
@@ -997,11 +976,11 @@ void PhysicsContext::DestroyBodies(std::span<const Physics::BodyID> handles) {
     }
 }
 
-void PhysicsContext::RegisterMaterial(uint32_t id, float friction, float restitution) {
-    _impl->world.RegisterMaterial(id, friction, restitution);
+auto PhysicsContext::RegisterMaterial(Physics::SurfaceMaterial material) -> Physics::PhysicsMaterialID {
+    return Physics::PhysicsMaterialID {GetInternalWorld().GetOrRegisterMaterial(material.friction, material.restitution)};
 }
 
-void PhysicsContext::AddImpulse(Physics::BodyID handle, ZHLN::FVec3 impulse) {
+void PhysicsContext::AddImpulse(Physics::DynamicBodyID handle, ZHLN::FVec3 impulse) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -1013,25 +992,6 @@ void PhysicsContext::AddImpulse(Physics::BodyID handle, ZHLN::FVec3 impulse) {
         .vx     = impulse.x,
         .vy     = impulse.y,
         .vz     = impulse.z,
-    };
-    _impl->world.mailbox.Enqueue(std::move(cmd));
-}
-
-void PhysicsContext::AddImpulse(Physics::BodyID handle, ZHLN::FVec3 impulse, ZHLN::DVec3 position) {
-    auto& bt = _impl->world.bodyTable;
-    if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
-        return;
-    }
-    Physics::Command cmd {};
-    cmd.type                    = Physics::CommandType::AddImpulseAtPosition;
-    cmd.payload.addImpulseAtPos = Physics::AddImpulseAtPosPayload {
-        .bodyID = handle,
-        .px     = static_cast<JPH::Real>(position.x),
-        .py     = static_cast<JPH::Real>(position.y),
-        .pz     = static_cast<JPH::Real>(position.z),
-        .ix     = impulse.x,
-        .iy     = impulse.y,
-        .iz     = impulse.z,
     };
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
@@ -1052,7 +1012,9 @@ void PhysicsContext::AddRadialImpulse(ZHLN::DVec3 center, float radius, float ma
         if (dist > 1e-4f && falloff > 0.01f) {
             const auto impulseDir = (diff / static_cast<double>(dist)).Cast<float>() + FVec3 {0.0f, 0.35f, 0.0f};
             const auto impulse    = impulseDir.Normalized() * (maxImpulse * falloff * falloff);
-            AddImpulse(physID, impulse);
+            if (const auto dynamic = AsDynamic(physID)) {
+                AddImpulse(*dynamic, impulse);
+            }
         }
     }
 }

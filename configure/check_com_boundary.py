@@ -82,6 +82,22 @@ SRC_ALLOWLIST: dict[str, str] = {
     ),
 }
 
+# Rule 1's deliberate exceptions in the public include tree. The physics wire
+# vocabulary needs the boundary's own fixed-layout value types (COM::Span for
+# borrowed geometry, COM::Option for optional pivots): both are standard-layout
+# and trivially copyable, which is exactly what ChainPayload and LayoutHash
+# demand of a chain node, and there is no non-COM header that spells one.
+PUBLIC_ALLOWLIST: dict[str, str] = {
+    "include/Zahlen/Physics/PhysicsShapes.hpp": (
+        "shape wire structs borrow geometry through COM::Span; the span IS the fixed-layout "
+        "spelling a chain node carries, and no engine-side header may redefine it"
+    ),
+    "include/Zahlen/Physics/PhysicsValues.hpp": (
+        "constraint wire structs carry optional pivots/limits as COM::Option; same bargain "
+        "as PhysicsShapes.hpp, and the struct must stay chain-safe"
+    ),
+}
+
 # ---- Rule 3: pure-data format plugins have no COM at all --------------------
 # plugins/BSP and plugins/glTF are *extension* plugins: they implement or
 # consume COM capabilities (IAssetLibrary, IGraphicsDevice) at the plugin
@@ -139,6 +155,9 @@ def relative(path: Path) -> str:
 def check_public_tree(violations: list[str]) -> None:
     for path in iter_sources(PUBLIC_ROOT):
         if any(is_under(path, allowed) for allowed in PUBLIC_ALLOWED_DIRS):
+            continue
+        rel = relative(path)
+        if rel in PUBLIC_ALLOWLIST:
             continue
         body = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
         for match in COM_INCLUDE_PATTERN.finditer(body):

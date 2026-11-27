@@ -664,14 +664,13 @@ void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& 
     if (rootPart == nullptr) return;
 
     auto& sim = *engine.Simulation();
-    Physics::CharacterCreateDesc charDesc {};
-    charDesc.position          = rootPart->position.Cast<double>();
-    charDesc.useCustomCapsule  = true;
-    charDesc.capsuleRadius     = 0.5f;
-    charDesc.capsuleHalfHeight = 2.0f;
-    charDesc.maxSlopeRadians   = std::numbers::pi_v<float> / 4.0f;
-    const auto charRes        = sim.CreateCharacter(COM::InChain(charDesc));
-    state.localControllerBody = charRes.HasValue() ? charRes.value : Physics::BodyID::Null();
+    const Physics::Capsule      capsule {.halfHeight = 2.0f, .radius = 0.5f};
+    const Physics::CharacterBody charRole {
+        .position      = rootPart->position.Cast<double>(),
+        .maxSlopeAngle = RadF {std::numbers::pi_v<float> / 4.0f},
+    };
+    const auto charRes        = sim.CreateCharacterRaw(COM::InChain(capsule, charRole));
+    state.localControllerBody = charRes.HasValue() ? Physics::BodyID(charRes.value) : Physics::BodyID::Null();
     if (state.localControllerBody == Physics::BodyID::Null()) {
         ZHLN::COM::LoggerView{engine.Logger()}.Warn("Could not create the local player CharacterVirtual body.");
         return;
@@ -707,7 +706,10 @@ void SceneMirror::UpdateLocalCharacterParts(COM::IEngine& engine, SceneMirrorSta
     const auto& bodyState    = bodyStateResult.value;
     const FVec3 rootPosition = bodyState.currentPosition.Cast<float>();
     const Quat  rootRotation = movement->orientation.Normalized();
-    const auto  velocity     = sim.CharacterVelocity(state.localControllerBody);
+    FVec3       velocity     = FVec3::Zero();
+    if (const auto charBody = sim.AsCharacter(state.localControllerBody)) {
+        velocity = sim.CharacterVelocity(*charBody);
+    }
     (void)dt;
 
     const auto* actions  = engine.Actions();

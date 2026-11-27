@@ -32,9 +32,7 @@ enum class CommandType : uint8_t {
     SetCharacterPosition,
     SetKinematicPose,
     AddImpulse,
-    AddImpulseAtPosition,
     CreateConstraint,
-    DestroyConstraint,
     SetConstraintTarget,
 };
 
@@ -47,6 +45,10 @@ struct CreateRigidPayload {
     float            ry;
     float            rz;
     float            rw;
+    // Initial velocity for dynamic spawns (zero for every other role).
+    float            vx;
+    float            vy;
+    float            vz;
     uint32_t         precreatedBodyID;
     uint32_t         materialID;
     uint32_t         category;
@@ -104,22 +106,14 @@ struct SetKinematicPosePayload {
     float      rw;
 };
 
-struct AddImpulseAtPosPayload {
-    BodyID bodyID;
-    JPH::Real  px;
-    JPH::Real  py;
-    JPH::Real  pz;
-    float      ix;
-    float      iy;
-    float      iz;
-};
 
 struct CreateConstraintPayload {
     ConstraintID constraintID;
     BodyID       b1;
     BodyID       b2;
-    ConstraintType   cType;
-    ConstraintParams params;
+    // The parameter struct names the constraint kind; the processing side
+    // std::visits it into the matching native builder.
+    ConstraintVariant params;
 };
 
 struct SetConstraintTargetPayload {
@@ -130,14 +124,12 @@ struct SetConstraintTargetPayload {
 union CommandPayload {
     uint8_t                    empty {};
     BodyID                 bodyID;
-    ConstraintID           constraintID;
     CreateRigidPayload         createRigid;
     CreateCharacterPayload     createChar;
     SetFilterPayload           setFilter;
     SetVelocityPayload         setVelocity;
     SetPositionPayload         setPosition;
     SetKinematicPosePayload    setKinematicPose;
-    AddImpulseAtPosPayload     addImpulseAtPos;
     CreateConstraintPayload    createConstraint;
     SetConstraintTargetPayload setConstraintTarget;
 };

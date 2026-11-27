@@ -39,7 +39,98 @@ struct BodyID {
 // A ragdoll uses a separate generational pool from rigid bodies.
 enum class RagdollID : uint64_t { Invalid = UINT64_MAX };
 
+// Body roles are pure tags here (payloads live in PhysicsValues.hpp).
+struct StaticBody;
+struct KinematicBody;
+struct DynamicBody;
+struct CharacterBody;
+
+// A body ID that remembers the role it was created as: handing a
+// CharacterBodyID where a DynamicBodyID belongs is a compile error. The
+// implicit conversion back to BodyID keeps role-agnostic calls (queries,
+// Destroy, raycasts) frictionless; the As* accessors narrow the other way at
+// runtime.
+template <typename Role>
+struct TypedBodyID {
+    uint32_t index      = UINT32_MAX;
+    uint32_t generation = UINT32_MAX;
+
+    [[nodiscard]] constexpr auto Pack() const noexcept -> uint64_t {
+        return (static_cast<uint64_t>(generation) << 32) | index;
+    }
+    [[nodiscard]] static constexpr auto Null() noexcept -> TypedBodyID {
+        return {};
+    }
+    [[nodiscard]] static constexpr auto From(BodyID id) noexcept -> TypedBodyID {
+        return {.index = id.index, .generation = id.generation};
+    }
+    constexpr operator BodyID() const noexcept {
+        return {.index = index, .generation = generation};
+    }
+    constexpr auto operator==(const TypedBodyID&) const noexcept -> bool = default;
+};
+
+using StaticBodyID   = TypedBodyID<StaticBody>;
+using KinematicBodyID = TypedBodyID<KinematicBody>;
+using DynamicBodyID  = TypedBodyID<DynamicBody>;
+using CharacterID    = TypedBodyID<CharacterBody>;
+
+// Constraints use their own generational pool, packed like BodyID.
+struct ConstraintID {
+    uint32_t index;
+    uint32_t generation;
+
+    [[nodiscard]] constexpr auto Pack() const noexcept -> uint64_t {
+        return (static_cast<uint64_t>(generation) << 32) | index;
+    }
+    constexpr auto operator==(const ConstraintID&) const noexcept -> bool = default;
+};
+
+// The constraint payload structs live in PhysicsValues.hpp; they are named
+// here only as tags so the ID vocabulary stays one header below payloads.
+struct FixedConstraint;
+struct PointConstraint;
+struct DistanceConstraint;
+struct HingeConstraint;
+struct SliderConstraint;
+struct ConeConstraint;
+
+// A constraint ID that remembers which constraint kind it creates: handing a
+// HingeConstraintID to SetTargetPosition is a compile error, not a silent
+// no-op. Implicitly converts to ConstraintID for slot storage.
+template <typename Kind>
+struct TypedConstraintID {
+    uint32_t index      = UINT32_MAX;
+    uint32_t generation = UINT32_MAX;
+
+    [[nodiscard]] constexpr auto Pack() const noexcept -> uint64_t {
+        return (static_cast<uint64_t>(generation) << 32) | index;
+    }
+    [[nodiscard]] static constexpr auto Null() noexcept -> TypedConstraintID {
+        return {};
+    }
+    [[nodiscard]] static constexpr auto From(ConstraintID id) noexcept -> TypedConstraintID {
+        return {.index = id.index, .generation = id.generation};
+    }
+    constexpr operator ConstraintID() const noexcept {
+        return {.index = index, .generation = generation};
+    }
+    constexpr auto operator==(const TypedConstraintID&) const noexcept -> bool = default;
+};
+
+using FixedConstraintID    = TypedConstraintID<FixedConstraint>;
+using PointConstraintID    = TypedConstraintID<PointConstraint>;
+using DistanceConstraintID = TypedConstraintID<DistanceConstraint>;
+using HingeConstraintID    = TypedConstraintID<HingeConstraint>;
+using SliderConstraintID   = TypedConstraintID<SliderConstraint>;
+using ConeConstraintID     = TypedConstraintID<ConeConstraint>;
+
 static_assert(sizeof(BodyID) == 8 && std::is_trivially_default_constructible_v<BodyID> && std::is_trivially_copyable_v<BodyID>);
 static_assert(sizeof(RagdollID) == 8 && std::is_trivially_copyable_v<RagdollID>);
+static_assert(std::is_trivially_default_constructible_v<ConstraintID> && std::is_trivially_copyable_v<ConstraintID>);
+static_assert(sizeof(TypedConstraintID<FixedConstraint>) == 8 && std::is_standard_layout_v<TypedConstraintID<FixedConstraint>> &&
+              std::is_trivially_copyable_v<TypedConstraintID<FixedConstraint>>);
+static_assert(sizeof(TypedBodyID<StaticBody>) == 8 && std::is_standard_layout_v<TypedBodyID<StaticBody>> &&
+              std::is_trivially_copyable_v<TypedBodyID<StaticBody>>);
 
 }

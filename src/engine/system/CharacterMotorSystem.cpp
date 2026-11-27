@@ -39,7 +39,8 @@ void PreStep(Engine& engine, float dt) {
         state.previousFacing = state.facing;
         if (motor->driveFacing && std::isfinite(motor->desiredFacing.LengthSquared()) && motor->desiredFacing.LengthSquared() > 0.0001f)
             state.facing = motor->desiredFacing.Normalized();
-        state.grounded     = physics.IsCharacterOnGround(body->physicsID);
+        const auto character = physics.AsCharacter(body->physicsID);
+        state.grounded       = character ? physics.IsCharacterOnGround(*character) : false;
         const float x      = Finite(motor->desiredVelocity.x);
         const float z      = Finite(motor->desiredVelocity.z);
         const float dx     = x - state.velocity.x;
@@ -55,7 +56,9 @@ void PreStep(Engine& engine, float dt) {
             state.velocity.y -= NonNegative(motor->gravity) * dt;
         registry.Patch<Components::CharacterMotorComponent>(entity, [](auto& command) { command.jumpRequested = false; });
         registry.Patch<Components::CharacterMotorStateComponent>(entity, [&](auto& output) { output = state; });
-        physics.SetCharacterVelocity(body->physicsID, state.velocity);
+        if (character) {
+            physics.SetVelocity(*character, state.velocity);
+        }
     }
 }
 void PostStep(Engine& engine) {
@@ -67,8 +70,10 @@ void PostStep(Engine& engine) {
         if (!body || !state || registry.Get<Components::PendingDestroy>(entity))
             continue;
         registry.Patch<Components::CharacterMotorStateComponent>(entity, [&](auto& output) {
-            output.grounded = physics.IsCharacterOnGround(body->physicsID);
-            output.velocity = physics.CharacterVelocity(body->physicsID);
+            if (const auto character = physics.AsCharacter(body->physicsID)) {
+                output.grounded = physics.IsCharacterOnGround(*character);
+                output.velocity = physics.CharacterVelocity(*character);
+            }
         });
     }
 }

@@ -35,13 +35,13 @@ struct PhysicsTestSuite {
             auto  world = MakePhysicsWorld();
             auto& sim   = *world->Simulation();
 
-            const auto floor = sim.CreateBoxBody(
-                FVec3 {20.0f, 0.5f, 20.0f},
-                ZHLN::Physics::RigidBodyPose {.position = DVec3 {0.0, -0.5, 0.0}, .motionType = ZHLN::Physics::MotionType::Static}
-            );
+            const auto floor = sim.CreateStaticBodyRaw(ZHLN::COM::InChain(
+                ZHLN::Physics::Box {.halfExtents = {20.0f, 0.5f, 20.0f}},
+                ZHLN::Physics::StaticBody {.position = DVec3 {0.0, -0.5, 0.0}}
+            ));
             const auto box = sim.CreateBoxBody(
                 FVec3 {0.5f, 0.5f, 0.5f},
-                ZHLN::Physics::RigidBodyPose {.position = DVec3 {0.0, 4.0, 0.0}, .motionType = ZHLN::Physics::MotionType::Dynamic}
+                ZHLN::Physics::DynamicBody {.position = DVec3 {0.0, 4.0, 0.0}}
             );
             ZHLN::Test::ExpectTrue(floor.HasValue() && box.HasValue());
             ZHLN::Test::ExpectFalse(sim.IsBodyDynamic(floor.value));
@@ -66,10 +66,10 @@ struct PhysicsTestSuite {
             auto& sim   = *world->Simulation();
 
             const auto sphere = sim.CreateSphereBody(
-                0.5f, ZHLN::Physics::RigidBodyPose {.position = DVec3 {0.0, 10.0, 0.0}, .motionType = ZHLN::Physics::MotionType::Dynamic}
+                0.5f, ZHLN::Physics::DynamicBody {.position = DVec3 {0.0, 10.0, 0.0}}
             );
             ZHLN::Test::ExpectTrue(sphere.HasValue());
-            sim.SetBodyLinearVelocity(sphere.value, FVec3 {6.0f, 0.0f, 0.0f});
+            sim.SetVelocity(sphere.value, FVec3 {6.0f, 0.0f, 0.0f});
             sim.Step(1.0f / 60.0f);
             const auto vel = sim.BodyLinearVelocity(sphere.value);
             ZHLN::Test::ExpectTrue(vel.HasValue() && std::abs(vel.value.x - 6.0f) < 0.1f);
@@ -81,12 +81,12 @@ struct PhysicsTestSuite {
             const auto afterImpulse = sim.BodyLinearVelocity(sphere.value);
             ZHLN::Test::ExpectTrue(afterImpulse.HasValue() && afterImpulse.value.z > 0.0f);
 
-            const auto kinematic = sim.CreateRigidBody(ZHLN::COM::InChain(
-                ZHLN::Physics::BoxShapeDesc {.halfExtents = {1.0f, 1.0f, 1.0f}},
-                ZHLN::Physics::RigidBodyPose {.position = DVec3 {0.0, 0.0, 0.0}, .motionType = ZHLN::Physics::MotionType::Kinematic}
+            const auto kinematic = sim.CreateKinematicBodyRaw(ZHLN::COM::InChain(
+                ZHLN::Physics::Box {.halfExtents = {1.0f, 1.0f, 1.0f}},
+                ZHLN::Physics::KinematicBody {.position = DVec3 {0.0, 0.0, 0.0}}
             ));
             ZHLN::Test::ExpectTrue(kinematic.HasValue());
-            sim.SetKinematicPose(kinematic.value, DVec3 {3.0, 5.0, -2.0}, ZHLN::Quat::Identity());
+            sim.SetPose(kinematic.value, DVec3 {3.0, 5.0, -2.0}, ZHLN::Quat::Identity());
             sim.Step(1.0f / 60.0f);
             const auto kinPos = sim.BodyPosition(kinematic.value);
             ZHLN::Test::ExpectTrue(kinPos.HasValue() && std::abs(kinPos.value.x - 3.0) < 0.1);
@@ -97,10 +97,10 @@ struct PhysicsTestSuite {
             auto  world = MakePhysicsWorld();
             auto& sim   = *world->Simulation();
 
-            const auto target = sim.CreateBoxBody(
-                FVec3 {1.0f, 1.0f, 1.0f},
-                ZHLN::Physics::RigidBodyPose {.position = DVec3 {0.0, 0.0, 5.0}, .motionType = ZHLN::Physics::MotionType::Static}
-            );
+            const auto target = sim.CreateStaticBodyRaw(ZHLN::COM::InChain(
+                ZHLN::Physics::Box {.halfExtents = {1.0f, 1.0f, 1.0f}},
+                ZHLN::Physics::StaticBody {.position = DVec3 {0.0, 0.0, 5.0}}
+            ));
             ZHLN::Test::ExpectTrue(target.HasValue());
 
             const auto hit = sim.Raycast(DVec3 {0.0, 0.0, 0.0}, FVec3 {0.0f, 0.0f, 1.0f}, 20.0f, ZHLN::Physics::BodyID::Null());
@@ -115,7 +115,7 @@ struct PhysicsTestSuite {
             const auto nearby = sim.BodiesInSphere(DVec3 {0.0, 0.0, 5.0}, 2.5f);
             ZHLN::Test::ExpectEq(nearby.size(), 1u);
 
-            const std::array toDestroy {target.value};
+            const std::array<ZHLN::Physics::BodyID, 1> toDestroy {ZHLN::Physics::BodyID(target.value)};
                         sim.DestroyBodies(ZHLN::COM::Span<const ZHLN::Physics::BodyID>(toDestroy.data(), toDestroy.size()));
             ZHLN::Test::ExpectFalse(sim.BodyPosition(target.value).HasValue());
             return {};
@@ -125,21 +125,30 @@ struct PhysicsTestSuite {
             auto  world = MakePhysicsWorld();
             auto& sim   = *world->Simulation();
 
-            const auto floor = sim.CreateBoxBody(
-                FVec3 {20.0f, 0.5f, 20.0f},
-                ZHLN::Physics::RigidBodyPose {.position = DVec3 {0.0, -0.5, 0.0}, .motionType = ZHLN::Physics::MotionType::Static}
-            );
+            const auto floor = sim.CreateStaticBodyRaw(ZHLN::COM::InChain(
+                ZHLN::Physics::Box {.halfExtents = {20.0f, 0.5f, 20.0f}},
+                ZHLN::Physics::StaticBody {.position = DVec3 {0.0, -0.5, 0.0}}
+            ));
             ZHLN::Test::ExpectTrue(floor.HasValue());
 
-            const ZHLN::Physics::DualShapeConfig hull {};
-            const auto character = sim.CreateCharacter(ZHLN::COM::InChain(
-                ZHLN::Physics::CharacterCreateDesc {.position = DVec3 {0.0, 0.15, 0.0}},
-                hull
-            ));
+            // The old default DualShape recipe (lifter sphere + bumper
+            // capsule at the sqrt offset), now a first-class compound. The
+            // explicit supporting volume keeps the lifter-centre plane the
+            // DualShape path always used.
+            const auto hull = ZHLN::Physics::MakeCompound(
+                ZHLN::Physics::Placed<ZHLN::Physics::Sphere> {ZHLN::Physics::Sphere {0.40F}, {0.0F, 0.40F, 0.0F}},
+                ZHLN::Physics::Placed<ZHLN::Physics::Capsule> {ZHLN::Physics::Capsule {0.20F, 0.50F},
+                                                               {0.0F, 0.82F, 0.0F}});
+            const auto character = sim.CreateBody(
+                hull,
+                ZHLN::Physics::CharacterBody {
+                    .position         = DVec3 {0.0, 0.15, 0.0},
+                    .supportingVolume = ZHLN::Physics::Plane {{0.0f, 1.0f, 0.0f}, -0.40F},
+                });
             ZHLN::Test::ExpectTrue(character.HasValue());
             ZHLN::Test::ExpectTrue(sim.CharacterGroundOffset(character.value) >= 0.0f);
 
-            sim.SetCharacterVelocity(character.value, FVec3 {2.0f, -4.0f, 0.0f});
+            sim.SetVelocity(character.value, FVec3 {2.0f, -4.0f, 0.0f});
             for (int i = 0; i < 30; ++i) {
                 sim.Step(1.0f / 60.0f);
             }
@@ -147,8 +156,8 @@ struct PhysicsTestSuite {
             const auto pos = sim.BodyPosition(character.value);
             ZHLN::Test::ExpectTrue(pos.HasValue() && pos.value.x > 0.5);
 
-            sim.SetCharacterPosition(character.value, DVec3 {-4.0, 2.0, 3.0});
-            sim.SetCharacterVelocity(character.value, FVec3 {0.0f, 0.0f, 0.0f});
+            sim.SetPose(character.value, DVec3 {-4.0, 2.0, 3.0});
+            sim.SetVelocity(character.value, FVec3 {0.0f, 0.0f, 0.0f});
             sim.Step(1.0f / 60.0f);
             const auto teleported = sim.BodyPosition(character.value);
             ZHLN::Test::ExpectTrue(teleported.HasValue() && std::abs(teleported.value.x - (-4.0)) < 1e-3);
@@ -159,7 +168,11 @@ struct PhysicsTestSuite {
             auto  world = MakePhysicsWorld();
             auto& sim   = *world->Simulation();
 
-            sim.RegisterPhysicsMaterial(7, 0.8f, 0.2f);
+            const auto materialID = sim.RegisterMaterial(ZHLN::Physics::SurfaceMaterial {.friction = 0.8f, .restitution = 0.2f});
+            ZHLN::Test::ExpectEq(static_cast<uint32_t>(materialID), 1u);
+            // The same fingerprint reuses the handle.
+            const auto again = sim.RegisterMaterial(ZHLN::Physics::SurfaceMaterial {.friction = 0.8f, .restitution = 0.2f});
+            ZHLN::Test::ExpectEq(static_cast<uint32_t>(again), static_cast<uint32_t>(materialID));
             const std::array<FVec3, 4> verts {
                 FVec3 {-5.0f, 0.0f, -5.0f},
                 FVec3 { 5.0f, 0.0f, -5.0f},
@@ -169,14 +182,12 @@ struct PhysicsTestSuite {
             const std::array<uint32_t, 6> indices {0, 2, 1, 0, 3, 2};
             const ZHLN::FVec3 v[] = {{-5.0f, 0.0f, -5.0f}, {5.0f, 0.0f, -5.0f}, {5.0f, 0.0f, 5.0f}, {-5.0f, 0.0f, 5.0f}};
             const uint32_t idx[]  = {0, 2, 1, 0, 3, 2};
-            ZHLN::Physics::MeshShapeDesc meshDesc {};
-            meshDesc.vertices    = v;
-            meshDesc.vertexCount = 4;
-            meshDesc.indices     = idx;
-            meshDesc.indexCount  = 6;
-            const auto meshBody = sim.CreateRigidBody(ZHLN::COM::InChain(
+            ZHLN::Physics::TriangleMesh meshDesc {};
+            meshDesc.vertices = {v, 4};
+            meshDesc.indices  = {idx, 6};
+            const auto meshBody = sim.CreateStaticBodyRaw(ZHLN::COM::InChain(
                 meshDesc,
-                ZHLN::Physics::RigidBodyPose {.motionType = ZHLN::Physics::MotionType::Static}
+                ZHLN::Physics::StaticBody {}
             ));
             ZHLN::Test::ExpectTrue(meshBody.HasValue());
             const auto hit = sim.Raycast({0.0, 4.0, 0.0}, {0.0f, -1.0f, 0.0f}, 10.0f, ZHLN::Physics::BodyID::Null());

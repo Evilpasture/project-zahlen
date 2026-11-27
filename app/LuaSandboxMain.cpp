@@ -108,7 +108,9 @@ struct SandboxState: ZHLN::Lua::Runtime {
             );
             if (cube != ZHLN::Entity::Null()) {
                 if (auto body = reg.Get<ZHLN::Components::PhysicsComponent>(cube)) {
-                    engine.Simulation()->AddImpulse(body->physicsID, forward * launchSpeed);
+                    if (const auto dynamic = engine.Simulation()->AsDynamic(body->physicsID)) {
+                        engine.Simulation()->AddImpulse(*dynamic, forward * launchSpeed);
+                    }
                 }
             }
             if (engine.Audio()->Initialized()) {

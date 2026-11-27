@@ -20,11 +20,11 @@
 
 namespace ZHLN::Physics {
 
-auto ShapeCache::GetOrCreate(ShapeType type, float p1, float p2, float p3, float p4) -> JPH::ShapeRefC {
-    const float np1 = (p1 < 1e-3f && type != ShapeType::Plane) ? 1e-3f : p1;
-    const float np2 = (p2 < 1e-3f && type != ShapeType::Plane) ? 1e-3f : p2;
-    const float np3 = (p3 < 1e-3f && type != ShapeType::Plane) ? 1e-3f : p3;
-    const float np4 = (type == ShapeType::Plane) ? p4 : 0.0f;
+auto ShapeCache::GetOrCreate(CachedShape type, float p1, float p2, float p3, float p4) -> JPH::ShapeRefC {
+    const float np1 = (p1 < 1e-3f && type != CachedShape::Plane) ? 1e-3f : p1;
+    const float np2 = (p2 < 1e-3f && type != CachedShape::Plane) ? 1e-3f : p2;
+    const float np3 = (p3 < 1e-3f && type != CachedShape::Plane) ? 1e-3f : p3;
+    const float np4 = (type == CachedShape::Plane) ? p4 : 0.0f;
 
     const ShapeKey key {
         .type = static_cast<uint32_t>(type),
@@ -45,31 +45,31 @@ auto ShapeCache::GetOrCreate(ShapeType type, float p1, float p2, float p3, float
 
     JPH::ShapeRefC newShape;
     switch (type) {
-        case ShapeType::Box: {
+        case CachedShape::Box: {
             JPH::BoxShapeSettings s(JPH::Vec3(np1, np2, np3), std::min({0.05f, np1, np2, np3}));
             const auto result = s.Create();
             if (result.IsValid()) newShape = result.Get();
             break;
         }
-        case ShapeType::Sphere: {
+        case CachedShape::Sphere: {
             JPH::SphereShapeSettings s(np1);
             const auto result = s.Create();
             if (result.IsValid()) newShape = result.Get();
             break;
         }
-        case ShapeType::Capsule: {
+        case CachedShape::Capsule: {
             JPH::CapsuleShapeSettings s(np1, np2);
             const auto result = s.Create();
             if (result.IsValid()) newShape = result.Get();
             break;
         }
-        case ShapeType::Cylinder: {
+        case CachedShape::Cylinder: {
             JPH::CylinderShapeSettings s(np1, np2, 0.05f);
             const auto result = s.Create();
             if (result.IsValid()) newShape = result.Get();
             break;
         }
-        case ShapeType::Plane: {
+        case CachedShape::Plane: {
             JPH::Plane              plane(JPH::Vec3(np1, np2, np3), np4);
             JPH::PlaneShapeSettings s(plane, nullptr, 1000.0f);
             const auto result = s.Create();
@@ -110,84 +110,129 @@ void ShapeCache::BindCollisionAssetResolver(CollisionAssetResolver lookup, void*
     assetMeshes.clear();
 }
 
-auto ShapeCache::Resolve(const AnyPrimitiveShape& shape) -> JPH::ShapeRefC {
-    return std::visit([this](const auto& s) -> JPH::ShapeRefC {
-        using S = std::remove_cvref_t<decltype(s)>;
-        if constexpr (std::is_same_v<S, Shape<Box>>) return GetOrCreate(ShapeType::Box, s.halfExtents.x, s.halfExtents.y, s.halfExtents.z, 0);
-        else if constexpr (std::is_same_v<S, Shape<Sphere>>) return GetOrCreate(ShapeType::Sphere, s.radius, 0, 0, 0);
-        else if constexpr (std::is_same_v<S, Shape<Capsule>>) return GetOrCreate(ShapeType::Capsule, s.halfHeight, s.radius, 0, 0);
-        else if constexpr (std::is_same_v<S, Shape<Cylinder>>) return GetOrCreate(ShapeType::Cylinder, s.halfHeight, s.radius, 0, 0);
-        else if constexpr (std::is_same_v<S, Shape<Plane>>) return GetOrCreate(ShapeType::Plane, s.normal.x, s.normal.y, s.normal.z, s.constant);
-        else if constexpr (std::is_same_v<S, Shape<HeightField>>) {
-            if (s.sampleCount < 2 || s.heights.size() < static_cast<size_t>(s.sampleCount) * s.sampleCount) return nullptr;
-            return Physics::CreateHeightFieldShape(s.heights.data(), static_cast<int>(s.sampleCount), s.worldSize);
-        }
-        else {
-            if (s.asset != CollisionAssetID::Invalid) {
-                CollisionAssetResolver lookup;
-                void* context;
-                {
-                    ZHLN::MutexGuard guard(mutex);
-                    lookup = resolver;
-                    context = resolverContext;
-                }
-                if (!lookup) return nullptr;
-                auto snapshot = lookup(context, s.asset);
-                if (!snapshot) return nullptr;
-                {
-                    ZHLN::MutexGuard guard(mutex);
-                    const auto found = assetMeshes.find(s.asset);
-                    if (found != assetMeshes.end() && found->second.snapshot.lock() == snapshot) return found->second.shape;
-                }
-                auto created = BuildMeshShape(snapshot->vertices, snapshot->indices);
-                if (!created) return nullptr;
-                ZHLN::MutexGuard guard(mutex);
-                auto found = assetMeshes.find(s.asset);
-                if (found != assetMeshes.end() && found->second.snapshot.lock() == snapshot) return found->second.shape;
-                assetMeshes.insert_or_assign(s.asset, AssetShapeEntry {snapshot, created});
-                return created;
-            }
-            if (s.vertices.size() > UINT32_MAX || s.indices.size() > UINT32_MAX) return nullptr;
-            for (auto index: s.indices) if (index >= s.vertices.size()) return nullptr;
-            // Hash borrowed data once, outside the cache lock. No input
-            // storage or pointers are retained in the cache. Fingerprint
-            // equality is probabilistic (hash collisions cannot be checked
-            // exactly without retaining or reloading the source geometry).
-            static_assert(sizeof(FVec3) == 3 * sizeof(float));
-            const MeshKey key {
-                Hash64(reinterpret_cast<const char*>(s.vertices.data()), s.vertices.size_bytes()),
-                Hash64(reinterpret_cast<const char*>(s.indices.data()), s.indices.size_bytes()),
-                static_cast<uint32_t>(s.vertices.size()), static_cast<uint32_t>(s.indices.size())
-            };
-            {
-                ZHLN::MutexGuard guard(mutex);
-                if (const auto found = meshes.find(key); found != meshes.end()) return found->second;
-            }
-            auto created = BuildMeshShape(s.vertices, s.indices);
-            if (!created) return nullptr;
-            ZHLN::MutexGuard guard(mutex);
-            return meshes.emplace(key, created).first->second;
-        }
-    }, shape);
+auto ShapeCache::Resolve(const Box& shape) -> JPH::ShapeRefC {
+    return GetOrCreate(CachedShape::Box, shape.halfExtents.x, shape.halfExtents.y, shape.halfExtents.z, 0.0f);
 }
 
-auto ShapeCache::Resolve(const AnyShape& shape) -> JPH::ShapeRefC {
-    return std::visit([this](const auto& s) -> JPH::ShapeRefC {
-        using S = std::remove_cvref_t<decltype(s)>;
-        if constexpr (std::is_same_v<S, Shape<Compound>>) {
-            if (s.children.empty()) return nullptr;
-            JPH::StaticCompoundShapeSettings settings;
-            for (const auto& child: s.children) {
-                auto resolved = Resolve(child.shape);
-                if (!resolved) return nullptr;
-                const auto& p = child.position;
-                const auto& r = child.rotation;
-                settings.AddShape(JPH::Vec3(p.x, p.y, p.z), JPH::Quat(r.x, r.y, r.z, r.w), resolved);
-            }
-            auto result = settings.Create();
-            return result.IsValid() ? result.Get() : nullptr;
-        } else return Resolve(AnyPrimitiveShape(s));
-    }, shape);
+auto ShapeCache::Resolve(const Sphere& shape) -> JPH::ShapeRefC {
+    return GetOrCreate(CachedShape::Sphere, shape.radius, 0.0f, 0.0f, 0.0f);
+}
+
+auto ShapeCache::Resolve(const Capsule& shape) -> JPH::ShapeRefC {
+    return GetOrCreate(CachedShape::Capsule, shape.halfHeight, shape.radius, 0.0f, 0.0f);
+}
+
+auto ShapeCache::Resolve(const Cylinder& shape) -> JPH::ShapeRefC {
+    return GetOrCreate(CachedShape::Cylinder, shape.halfHeight, shape.radius, 0.0f, 0.0f);
+}
+
+auto ShapeCache::Resolve(const Plane& shape) -> JPH::ShapeRefC {
+    return GetOrCreate(CachedShape::Plane, shape.normal.x, shape.normal.y, shape.normal.z, shape.constant);
+}
+
+auto ShapeCache::Resolve(const TriangleMesh& shape) -> JPH::ShapeRefC {
+    if (shape.vertices.size > UINT32_MAX || shape.indices.size > UINT32_MAX) return nullptr;
+    for (auto index: shape.indices) if (index >= shape.vertices.size) return nullptr;
+    // Hash borrowed data once, outside the cache lock. No input
+    // storage or pointers are retained in the cache. Fingerprint
+    // equality is probabilistic (hash collisions cannot be checked
+    // exactly without retaining or reloading the source geometry).
+    static_assert(sizeof(FVec3) == 3 * sizeof(float));
+    const MeshKey key {
+        Hash64(reinterpret_cast<const char*>(shape.vertices.data), shape.vertices.size * sizeof(FVec3)),
+        Hash64(reinterpret_cast<const char*>(shape.indices.data), shape.indices.size * sizeof(uint32_t)),
+        static_cast<uint32_t>(shape.vertices.size), static_cast<uint32_t>(shape.indices.size)
+    };
+    {
+        ZHLN::MutexGuard guard(mutex);
+        if (const auto found = meshes.find(key); found != meshes.end()) return found->second;
+    }
+    auto created = BuildMeshShape(shape.vertices, shape.indices);
+    if (!created) return nullptr;
+    ZHLN::MutexGuard guard(mutex);
+    return meshes.emplace(key, created).first->second;
+}
+
+auto ShapeCache::Resolve(const MeshAsset& shape) -> JPH::ShapeRefC {
+    if (shape.id == CollisionAssetID::Invalid) return nullptr;
+    CollisionAssetResolver lookup;
+    void* context;
+    {
+        ZHLN::MutexGuard guard(mutex);
+        lookup = resolver;
+        context = resolverContext;
+    }
+    if (!lookup) return nullptr;
+    auto snapshot = lookup(context, shape.id);
+    if (!snapshot) return nullptr;
+    {
+        ZHLN::MutexGuard guard(mutex);
+        const auto found = assetMeshes.find(shape.id);
+        if (found != assetMeshes.end() && found->second.snapshot.lock() == snapshot) return found->second.shape;
+    }
+    auto created = BuildMeshShape(snapshot->vertices, snapshot->indices);
+    if (!created) return nullptr;
+    ZHLN::MutexGuard guard(mutex);
+    auto found = assetMeshes.find(shape.id);
+    if (found != assetMeshes.end() && found->second.snapshot.lock() == snapshot) return found->second.shape;
+    assetMeshes.insert_or_assign(shape.id, AssetShapeEntry {snapshot, created});
+    return created;
+}
+
+auto ShapeCache::Resolve(const HeightField& shape) -> JPH::ShapeRefC {
+    if (shape.sampleCount < 2 || shape.heights.size < static_cast<size_t>(shape.sampleCount) * shape.sampleCount) return nullptr;
+    return Physics::CreateHeightFieldShape(shape.heights.data, static_cast<int>(shape.sampleCount), shape.worldSize);
+}
+
+namespace {
+
+// One pass over a Compound's children in insertion order (the SubShapeID
+// order), stamp-verified through the shared dispatch: every child must carry
+// the ChainInNode identity of a Placed<T> payload, nested compounds recurse
+// through this same builder (bounded by kMaxCompoundDepth), and any foreign
+// stamp or unresolvable child fails the whole shape. This is structural
+// only -- role policy lives at the CreateBody boundary.
+[[nodiscard]] auto MakeCompoundShape(ShapeCache& cache, const Compound& compound, uint32_t depth) -> JPH::ShapeRefC {
+    if (compound.children.data == nullptr || compound.children.size == 0) return nullptr;
+    if (depth >= kMaxCompoundDepth) return nullptr;
+
+    JPH::StaticCompoundShapeSettings settings;
+    for (size_t index = 0; index < compound.children.size; ++index) {
+        bool valid   = true;
+        const bool matched = VisitCompoundChild<Box, Sphere, Capsule, Cylinder, Plane, TriangleMesh, MeshAsset, Compound>(
+            compound.children[index], [&](const auto& child) {
+                using T = std::remove_cvref_t<decltype(child)>;
+                if constexpr (std::is_same_v<T, Placed<Compound>>) {
+                    const JPH::ShapeRefC nested = MakeCompoundShape(cache, child.shape, depth + 1U);
+                    if (!nested) {
+                        valid = false;
+                        return;
+                    }
+                    settings.AddShape(JPH::Vec3(child.position.x, child.position.y, child.position.z),
+                                      JPH::Quat(child.rotation.x, child.rotation.y, child.rotation.z, child.rotation.w),
+                                      nested);
+                } else {
+                    const JPH::ShapeRefC resolved = cache.Resolve(child.shape);
+                    if (!resolved) {
+                        valid = false;
+                        return;
+                    }
+                    settings.AddShape(JPH::Vec3(child.position.x, child.position.y, child.position.z),
+                                      JPH::Quat(child.rotation.x, child.rotation.y, child.rotation.z, child.rotation.w),
+                                      resolved);
+                }
+            });
+        if (!matched || !valid) return nullptr;
+    }
+
+    auto result = settings.Create();
+    return result.IsValid() ? result.Get() : nullptr;
+}
+
+} // namespace
+
+auto ShapeCache::Resolve(const Compound& shape) -> JPH::ShapeRefC {
+    return MakeCompoundShape(*this, shape, 0U);
 }
 
 void ShapeCache::ClearMeshes() noexcept {

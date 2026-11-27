@@ -17,6 +17,11 @@
 
 namespace ZHLN::Physics {
 
+// Internal cache-key tags for the primitive flyweights. This is not a
+// creation API: creation spells shapes as their value structs (Box, Sphere,
+// ...) and hands them to a typed Resolve; the tag only keys the map.
+enum class CachedShape : uint32_t { Box = 0, Sphere = 1, Capsule = 2, Cylinder = 3, Plane = 4 };
+
 struct ShapeKey {
     uint32_t type = 0;
     float    p1   = 0.0f;
@@ -60,12 +65,24 @@ struct alignas(64) ShapeCache {
     CollisionAssetResolver resolver = nullptr;
     void* resolverContext = nullptr;
 
-    [[nodiscard]] auto GetOrCreate(ShapeType type, float p1, float p2, float p3, float p4) -> JPH::ShapeRefC;
-    [[nodiscard]] auto Resolve(const AnyShape& shape) -> JPH::ShapeRefC;
-    [[nodiscard]] auto Resolve(const AnyPrimitiveShape& shape) -> JPH::ShapeRefC;
+    // One typed overload per shape: no runtime type enum crosses into the
+    // cache API, so a wrong-shape/wrong-argument pairing cannot compile.
+    [[nodiscard]] auto Resolve(const Box& shape) -> JPH::ShapeRefC;
+    [[nodiscard]] auto Resolve(const Sphere& shape) -> JPH::ShapeRefC;
+    [[nodiscard]] auto Resolve(const Capsule& shape) -> JPH::ShapeRefC;
+    [[nodiscard]] auto Resolve(const Cylinder& shape) -> JPH::ShapeRefC;
+    [[nodiscard]] auto Resolve(const Plane& shape) -> JPH::ShapeRefC;
+    [[nodiscard]] auto Resolve(const TriangleMesh& shape) -> JPH::ShapeRefC;
+    [[nodiscard]] auto Resolve(const MeshAsset& shape) -> JPH::ShapeRefC;
+    [[nodiscard]] auto Resolve(const HeightField& shape) -> JPH::ShapeRefC;
+    [[nodiscard]] auto Resolve(const Compound& shape) -> JPH::ShapeRefC;
+
     void               BindCollisionAssetResolver(CollisionAssetResolver lookup, void* context) noexcept;
     void               ClearMeshes() noexcept;
     void               Clear() noexcept;
+
+  private:
+    [[nodiscard]] auto GetOrCreate(CachedShape type, float p1, float p2, float p3, float p4) -> JPH::ShapeRefC;
 };
 
 static_assert(std::is_standard_layout_v<ShapeKey>);

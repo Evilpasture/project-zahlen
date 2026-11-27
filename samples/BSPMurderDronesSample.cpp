@@ -1480,7 +1480,7 @@ auto main(int argc, char* argv[]) -> int {
 
     const ZHLN::Locomotion::PrefabBounds rigBounds =
         rigInfo ? ZHLN::Locomotion::MeasurePrefabBounds(*rigInfo) : ZHLN::Locomotion::PrefabBounds {};
-    const ZHLN::Physics::DualShapeConfig playerHull      = ZHLN::Locomotion::FitDualShapeToBounds(rigBounds);
+    const auto                      playerHull      = ZHLN::Locomotion::FitDualShapeToBounds(rigBounds);
     const float                          characterHeight = rigBounds.valid ? std::max(rigBounds.GetSize().y, 0.30f) : kEyeHeightMeters;
 
     {
@@ -1488,7 +1488,13 @@ auto main(int argc, char* argv[]) -> int {
         const FVec3 spawnFeet {sceneDesc.camera.position};
         const FVec3 spawnCenter = spawnFeet + FVec3(0.0f, 0.05f, 0.0f);
 
-        const auto bodyRes = engine->Simulation()->CreateCharacter(ZHLN::COM::InChain(ZHLN::Physics::CharacterCreateDesc {.position = spawnCenter.Cast<double>(), .maxSlopeRadians = (std::numbers::pi_v<float> / 180.0f) * 50.0f}, playerHull));
+        const auto bodyRes = engine->Simulation()->CreateBody(
+            ZHLN::Locomotion::MakeDualCollider(playerHull),
+            ZHLN::Physics::CharacterBody {
+                .position         = spawnCenter.Cast<double>(),
+                .maxSlopeAngle    = ZHLN::RadF {(std::numbers::pi_v<float> / 180.0f) * 50.0f},
+                .supportingVolume = ZHLN::Physics::Plane {{0.0f, 1.0f, 0.0f}, -playerHull.GetLifterOffsetY()},
+            });
         if (!bodyRes.HasValue() || bodyRes.value == ZHLN::Physics::BodyID::Null()) {
             ZHLN::Log<ZHLN::LogSeverity::Error>("Failed to create the player CharacterVirtual body.");
             return EXIT_FAILURE;

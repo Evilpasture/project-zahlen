@@ -128,11 +128,10 @@ auto System::Create(Geometry geometry, const CreateInfo& info) -> std::expected<
         ))
         return fail(COM::Error::InvalidArgument);
     if (info.createPhysics) {
-        const auto body = engine.Simulation()->CreateRigidBody(
+        const auto body = engine.Simulation()->CreateStaticBodyRaw(
             COM::InChain(
-                Physics::HeightFieldShapeDesc {.heights = tile.geometry.heights.data(), .sampleCount = n, .worldSize = tile.geometry.worldSize},
-                Physics::RigidBodyPose {.position = info.position.Cast<double>(), .motionType = Physics::MotionType::Static},
-                Physics::RigidBodyFilter {.layer = Physics::ObjectLayer::NonMoving, .hasExplicitLayer = true}
+                Physics::HeightField {.heights = tile.geometry.heights, .sampleCount = n, .worldSize = tile.geometry.worldSize},
+                Physics::StaticBody {.position = info.position.Cast<double>()}
             )
         );
         if (!body.HasValue())

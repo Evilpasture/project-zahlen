@@ -453,6 +453,23 @@ auto PhysicsWorld::ResolveMaterial(uint32_t id) const -> MaterialData {
     return materialDefault;
 }
 
+auto PhysicsWorld::GetOrRegisterMaterial(float friction, float restitution) -> uint32_t {
+    ZHLN::MutexGuard guard(materialMutex);
+    for (size_t i = 0; i < materialCount; ++i) {
+        if (materials[i].friction == friction && materials[i].restitution == restitution) {
+            return materials[i].id;
+        }
+    }
+    const uint32_t id = nextMaterialID++;
+    if (materialCount >= materials.size()) {
+        const size_t newCap = materials.empty() ? 16u : materials.size() * 2u;
+        materials.resize(newCap);
+        materialCapacity = newCap;
+    }
+    materials[materialCount++] = MaterialData {.id = id, .friction = friction, .restitution = restitution};
+    return id;
+}
+
 auto PhysicsWorld::AllocateConstraintID() -> ConstraintID {
     ZHLN::MutexGuard guard(constraintMutex);
     if (freeConstraintCount == 0) {

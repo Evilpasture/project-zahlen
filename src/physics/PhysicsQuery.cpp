@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PhysicsWorld.hpp"
+#include <physics/MathConversions.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -287,19 +288,19 @@ auto PhysicsContext::RaycastAllPenetrations(
         Physics::RaycastPenetrationResult res {};
         res.hasHit     = true;
         res.bodyID     = *handle;
-        res.materialID = world.bodyTable.slotMaterialIDs[handle->index].load(std::memory_order::relaxed);
+        res.materialID = Physics::PhysicsMaterialID {world.bodyTable.slotMaterialIDs[handle->index].load(std::memory_order::relaxed)};
 
         if (!entryHit.isBackFace) {
-            res.entryPosition = entryHit.position;
-            res.entryNormal   = entryHit.normal;
+            res.entryPosition = Physics::FromJoltPosition(entryHit.position);
+            res.entryNormal   = Physics::FromJoltVector(entryHit.normal);
             res.entryFraction = entryHit.fraction;
 
             bool foundExit = false;
             for (size_t j = i + 1; j < hits.size(); ++j) {
                 if (!processed[j] && hits[j].bodyID == entryHit.bodyID && hits[j].isBackFace) {
                     processed[j]     = true;
-                    res.exitPosition = hits[j].position;
-                    res.exitNormal   = hits[j].normal;
+                    res.exitPosition = Physics::FromJoltPosition(hits[j].position);
+                    res.exitNormal   = Physics::FromJoltVector(hits[j].normal);
                     res.exitFraction = hits[j].fraction;
                     foundExit        = true;
                     break;
@@ -308,15 +309,15 @@ auto PhysicsContext::RaycastAllPenetrations(
 
             if (!foundExit) {
                 res.exitFraction = 1.0f;
-                res.exitPosition = ray.GetPointOnRay(1.0f);
-                res.exitNormal   = -dirNorm;
+                res.exitPosition = Physics::FromJoltPosition(ray.GetPointOnRay(1.0f));
+                res.exitNormal   = Physics::FromJoltVector(-dirNorm);
             }
         } else {
-            res.entryPosition = JPH::RVec3(origin.x, origin.y, origin.z);
-            res.entryNormal   = -dirNorm;
+            res.entryPosition = origin;
+            res.entryNormal   = Physics::FromJoltVector(-dirNorm);
             res.entryFraction = 0.0f;
-            res.exitPosition  = entryHit.position;
-            res.exitNormal    = entryHit.normal;
+            res.exitPosition  = Physics::FromJoltPosition(entryHit.position);
+            res.exitNormal    = Physics::FromJoltVector(entryHit.normal);
             res.exitFraction  = entryHit.fraction;
         }
 
@@ -377,11 +378,11 @@ auto PhysicsContext::Shapecast(
             result.bodyID       = *handle;
             result.hasHit       = true;
             result.fraction     = collector.mHit.mFraction;
-            result.contactPoint = JPH::RVec3(collector.mHit.mContactPointOn2);
+            result.contactPoint = Physics::FromJoltPosition(JPH::RVec3(collector.mHit.mContactPointOn2));
 
             const JPH::Vec3 axis  = -collector.mHit.mPenetrationAxis;
             const float     lenSq = axis.LengthSq();
-            result.contactNormal  = (lenSq > 1e-6f) ? (axis / std::sqrt(lenSq)) : JPH::Vec3::sAxisY();
+            result.contactNormal  = Physics::FromJoltVector((lenSq > 1e-6f) ? (axis / std::sqrt(lenSq)) : JPH::Vec3::sAxisY());
         }
     }
     return result;
