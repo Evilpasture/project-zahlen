@@ -117,7 +117,10 @@ fi
 # release key: publishing uses ZHLN_RELEASE_KEY_PEM and the pinned public key.
 "$zpkg" key add "$out/zahlen-release-key.pub" --name "zahlen CI" >/dev/null
 "$zpkg" key list
-fingerprint=$("$zpkg" key list | awk '{print $1; exit}')
+# Derive the ephemeral CI key fingerprint directly rather than taking the first
+# line of `zpkg key list`, where the built-in official key is listed first.
+fingerprint=$(tail -c 32 /tmp/release-key.der | sha256sum | cut -c1-32)
+test -n "$fingerprint"
 sign_file "$out/SHA256SUMS"
 "$zpkg" index "$out" --out "$out/index.json"
 sign_file "$out/index.json"
