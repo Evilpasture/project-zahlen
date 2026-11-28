@@ -8,6 +8,8 @@ All documentation in this repository must read like a POSIX man page or compiler
 - **No external comparisons.** Do not analogize mechanisms to `pacman`, `apt`, `cargo`, `ubuntu-keyring`, browsers, or other ecosystems.
 - **No unsolicited tutorials on basics.** Assume the reader understands standard C++, CMake, Git, and cryptographic signing. State the verification behavior; do not lecture on why out-of-band trust or checksums matter.
 - **No defensive disclaimers.** State preconditions and limits directly.
+- **No explanatory clauses.** Never use connector phrases like "which ensures", "in order to", "allowing you to", or "because it". 
+- If a sentence requires an explanation of *how* or *why* a background mechanism works, delete the explanation entirely. State only the imperative command or the raw fact.
 
 ## 2. Banned Syntactic Patterns & Phrases
 Before finalizing any documentation edit, reject and rewrite any sentence matching these LLM prose patterns:

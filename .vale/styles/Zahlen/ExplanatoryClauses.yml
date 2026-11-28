@@ -1,0 +1,17 @@
+extends: existence
+message: "Remove explanatory subordinate clause ('%s'). State the direct fact or command only; never explain the mechanism."
+level: error
+ignorecase: true
+tokens:
+  - "which ensures that"
+  - "thereby allowing"
+  - "in order to"
+  - "which means that"
+  - "because it"
+  - "since it"
+  - "so that"
+  - "designed to"
+  - "meant to"
+  - "allows you to"
+  - "enables you to"
+  - "giving you the ability to"
