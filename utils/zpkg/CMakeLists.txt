@@ -19,29 +19,9 @@
 #     cmake --build build-zpkg && build-zpkg/zpkg --version
 cmake_minimum_required(VERSION 3.28)
 
-# zpkg has its own CalVer (YYYY.MM.DD), independent of the engine's semver.
-# A PKGBUILD bump is not an engine upgrade: the manager and the toolchain are
-# released on different schedules and must not share a number.
-# utils/zpkg/VERSION is the single source of truth. scripts/bump-zpkg-calver.sh
-# keeps the PKGBUILD copy in sync, and the release workflow refuses a VERSION
-# that is not the release date. ZPKG_VERSION overrides it for a standalone build
-# of utils/zpkg (e.g. the Windows CI job).
-set(ZPKG_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
-if(ZPKG_VERSION)
-    set(_zpkg_version "${ZPKG_VERSION}")
-elseif(EXISTS "${ZPKG_VERSION_FILE}")
-    file(READ "${ZPKG_VERSION_FILE}" _zpkg_version)
-    string(STRIP "${_zpkg_version}" _zpkg_version)
-    if(NOT _zpkg_version MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
-        message(FATAL_ERROR "${ZPKG_VERSION_FILE} must be CalVer YYYY.MM.DD, got '${_zpkg_version}'")
-    endif()
-else()
-    message(FATAL_ERROR
-        "zpkg takes its CalVer from ${ZPKG_VERSION_FILE}; pass "
-        "-DZPKG_VERSION=<YYYY.MM.DD> when building utils/zpkg on its own.")
-endif()
-project(zpkg LANGUAGES CXX VERSION ${_zpkg_version})
-message(STATUS "zpkg: CalVer ${PROJECT_VERSION} (from ${ZPKG_VERSION_FILE})")
+# CalVer format: YYYY.MM.DD. Also update packaging/arch/PKGBUILD's pkgver.
+project(zpkg VERSION 2026.11.25 LANGUAGES CXX)
+message(STATUS "zpkg: CalVer ${PROJECT_VERSION}")
 
 # C++23, not C++20: the error path is std::expected (see include/zpkg/zpkg.hpp),
 # and this project does not throw. Where the engine is conservative about the

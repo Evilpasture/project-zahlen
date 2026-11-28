@@ -35,12 +35,6 @@ if(APPLE)
 endif()
 
 
-# The engine version, and the only place a version number is written by hand.
-#
-# Everything else derives from PROJECT_VERSION: include/Zahlen/Version.hpp.in is
-# configured from it, cmake/Toolchains.cmake uses it for the toolchain id and the
-# exported package version, .github/workflows/release.yml takes the release tag
-# from it, and tests/version_test.py fails the build when a copy disagrees.
 project(zahlen VERSION 0.6.0 LANGUAGES C CXX ASM)
 
 option(ZHLN_INSTALL_TOOLCHAIN_PACKAGES "Install independently consumable toolchain packages" OFF)
@@ -221,9 +215,6 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/Zahlen/Version.hpp.in"
     "${ZHLN_GENERATED_INCLUDE_DIR}/Zahlen/Version.hpp" @ONLY)
 include_directories(BEFORE SYSTEM "${ZHLN_GENERATED_INCLUDE_DIR}")
 
-# PROJECT_VERSION is the engine's only hand-written version number. zpkg has its
-# own CalVer in utils/zpkg/VERSION, mirrored into the PKGBUILD; the check below
-# refuses a release whose engine tag, zpkg CalVer and PKGBUILD have drifted apart.
 if(ZHLN_HAS_PYTHON)
     execute_process(
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/version_test.py" --check

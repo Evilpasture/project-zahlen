@@ -31,10 +31,6 @@ namespace fs = std::filesystem;
 inline constexpr int              PackageFormat = 1;
 inline constexpr int              IndexFormat   = 2;
 
-// zpkg's own CalVer, defined by utils/zpkg/CMakeLists.txt from
-// utils/zpkg/VERSION. It is deliberately NOT the engine version: `zpkg --version`
-// answers "which package manager is this", while `zpkg info` and `zpkg list`
-// answer "which engine toolchain is installed".
 #ifndef ZPKG_TOOL_VERSION
 #error "ZPKG_TOOL_VERSION is set by utils/zpkg/CMakeLists.txt; do not compile zpkg by hand"
 #endif

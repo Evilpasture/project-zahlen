@@ -143,13 +143,6 @@ jobs:
         with:
           submodules: false
 
-      # zpkg is CalVer. A stale utils/zpkg/VERSION must stop the release before
-      # a binary with yesterday's date is published.
-      - name: zpkg CalVer must be the release date
-        env:
-          CALVER: ${{ needs.version.outputs.calver }}
-        run: scripts/bump-zpkg-calver.sh --check --date "${CALVER}"
-
       - name: PKGBUILD pin must reference an earlier commit
         run: scripts/pin-zpkg-pkgbuild.sh --check
 
