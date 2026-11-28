@@ -408,10 +408,8 @@ jobs:
     env:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
     steps:
-      # This job deliberately downloads nothing but the release: the whole point
-      # is that the published artifacts are sufficient. The repository is here
-      # only for the environment script, which is the same one the build job ran
-      # -- that is what makes "the runtime deps" identical on both sides.
+      # This job downloads the published release artifacts and uses the
+      # repository only for the shared environment setup script.
       - name: Checkout repository (for the environment script only)
         uses: actions/checkout@v4
         with:
@@ -455,8 +453,7 @@ jobs:
           # The manager binary ships separately from the packages, so it has its
           # own sums file (the packages' SHA256SUMS is zpkg's own contract).
           ( cd dist && sha256sum -c SHA256SUMS.tools )
-          # The official release key is built into zpkg; a fresh user store
-          # verifies these signed packages without a manual key-add step.
+          # Show the signing keys configured in this fresh store.
           zpkg key list
           # No ZHLN_ROOT: the default per-user store is what a developer gets.
           zpkg install dist --require-checksums --require-signatures
@@ -530,8 +527,7 @@ jobs:
           zpkg install prev-dist --require-checksums --require-signatures
           zpkg list
 
-          # The one-time trust step for the long-lived project key. After this,
-          # no `key add` may appear: sync must install the new release as-is.
+          # Add the current project key before syncing to this release.
           zpkg key add packaging/keys/zahlen-release.pub --name "zahlen release"
           zpkg sync --version "${RELEASE_TAG}" --activate
           zpkg list

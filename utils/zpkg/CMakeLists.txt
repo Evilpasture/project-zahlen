@@ -52,13 +52,8 @@ target_include_directories(zpkg_core PUBLIC include)
 target_compile_definitions(zpkg_core PUBLIC ZPKG_TOOL_VERSION="${PROJECT_VERSION}")
 
 # --- Embedded official signing key -----------------------------------------
-# The release publisher's key is baked into the binary at build time, so a
-# user who downloaded zpkg from GitHub Releases never has to trust a key
-# out of band: the binary they already trust carries the key it verifies
-# with. This is the same model as pacman (archlinux-keyring), apt
-# (ubuntu-keyring) and browser root CAs. A build that wants no default key
-# passes -DZPKG_BUILTIN_RELEASE_KEY=OFF; official installs then refuse until
-# the user trusts a key with `zpkg key add`, as before.
+# Embed the official release public key from packaging/keys. Set
+# ZPKG_BUILTIN_RELEASE_KEY=OFF to build without a default trusted key.
 if(ZPKG_BUILTIN_RELEASE_KEY_PATH)
     set(ZPKG_OFFICIAL_KEY_PATH "${ZPKG_BUILTIN_RELEASE_KEY_PATH}")
 else()

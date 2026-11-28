@@ -1,58 +1,49 @@
 # Release signing key
 
-`zahlen-release.pub` is the **long-lived** public key `zpkg` embeds at build
-time (see `utils/zpkg/CMakeLists.txt`), so users never trust it by hand.
-`FINGERPRINT` is the first 32 hex characters of SHA-256 over the
-raw 32-byte public key — the same value `zpkg key list`, the `.ed25519` signer
-lines, `KEY-FINGERPRINT.txt` and the release notes print.
+`zahlen-release.pub` is the public key used to verify official package releases.
+CMake embeds its contents into `zpkg` during the build. `FINGERPRINT` contains
+the first 32 hexadecimal characters of SHA-256 over the raw 32-byte public key.
+The fingerprint appears in `zpkg key list`, signature files, `KEY-FINGERPRINT.txt`,
+and release notes.
 
-Because the key is committed to this repository, git history is the trust
-anchor: the build reads this file and bakes it into the binary, the same model
-as `pacman` (`archlinux-keyring`) and `apt` (`ubuntu-keyring`). A key that is
-only published inside the release it signs proves nothing; this one is pinned
-here, in git, and in the binary. `zpkg key add` remains for other publishers.
+## Private key
 
-## The private half
-
-The private key is a base64-encoded PKCS#8 ed25519 PEM held in the
+The private key is a base64-encoded PKCS#8 Ed25519 PEM stored in the
 `ZHLN_RELEASE_KEY_PEM` GitHub Actions secret. `.github/workflows/release.yml`
-passes it into the release build container; `scripts/package-toolchain.sh`
-refuses to publish if it is missing, instead of quietly generating a throwaway
-key. Nothing in this directory is secret.
+passes it to the release build. `scripts/package-toolchain.sh` checks that the
+secret is present before signing. The private key does not belong in this
+directory or in the repository.
 
-Bootstrap once on a trusted machine:
+Create a key pair on a trusted machine with:
 
 ```sh
-scripts/bootstrap-release-key.sh          # prints the secret; never commit it
+scripts/bootstrap-release-key.sh
 scripts/bootstrap-release-key.sh --verify <saved-secret-file>
 ```
 
-## Rotation (deliberate only)
+## Rotation
 
-`scripts/package-toolchain.sh` signs `SHA256SUMS` and `index.json` with one line
-per signer, and `zpkg` accepts a signature from *any* trusted key. For a
-rotation:
+`scripts/package-toolchain.sh` signs `SHA256SUMS` and `index.json`. A transition
+release can carry signatures from both the old and new keys:
 
-1. Generate the new pair and commit the new `.pub` + `FINGERPRINT`.
-2. Put the **new** private key in `ZHLN_RELEASE_KEY_PEM` and the **old** one in
-   `ZHLN_RELEASE_KEY_PEM_PREVIOUS`.
-3. Publish one dual-signed release, so stores holding either key still install.
-4. Ship a new `zpkg` built from the new `.pub`, then drop
-   `ZHLN_RELEASE_KEY_PEM_PREVIOUS`.
+1. Generate the new key pair and commit the new `.pub` and `FINGERPRINT` files.
+2. Store the new private key in `ZHLN_RELEASE_KEY_PEM` and the old private key
+   in `ZHLN_RELEASE_KEY_PEM_PREVIOUS`.
+3. Publish a release signed by both keys.
+4. Build and publish a `zpkg` containing the new public key, then remove
+   `ZHLN_RELEASE_KEY_PEM_PREVIOUS` from the workflow secrets.
 
-Users who pinned the old key can still verify the transition release; users
-with a `zpkg` built from the new key verify it through the built-in key.
-`scripts/check-release-consistency.sh`
-fails if a release is signed by a key that is not the pinned one, so a silent
-rotation cannot reach a published asset.
+`zpkg` accepts a signature from any trusted key. Existing installations with
+the old key can verify the transition release; managers built with the new key
+can verify it as well.
 
-## What CI checks
+## CI checks
 
 | Check | Where |
 |---|---|
-| secret present, derived public key equals `packaging/keys/zahlen-release.pub` | `scripts/package-toolchain.sh` |
-| `KEY-FINGERPRINT.txt`, `.ed25519` signers, release notes and pinned fingerprint all agree | `scripts/check-release-consistency.sh` (pre-publish and post-publish) |
-| `SHA256SUMS` / `SHA256SUMS.tools` cover exactly the shipped files | same |
-| no `cube-consumer-*` / `zahlen-cube-*.png` example assets remain | same |
-| `zpkg verify --require-signatures` succeeds with only the pinned key trusted | same |
-| an existing store can install the new release without any `key add` | `consume` job, "Upgrade from the previous release" |
+| Signing secret derives the checked-in public key | `scripts/package-toolchain.sh` |
+| Published key, fingerprint, signatures and release notes agree | `scripts/check-release-consistency.sh` (before and after publishing) |
+| Package and tool checksum files match the shipped archives and tools | same |
+| Example projects and rendered frames are absent from release assets | same |
+| `zpkg verify --require-signatures` accepts the package archives | same |
+| Installation and upgrade between release generations | `consume` job, "Upgrade from the previous release" |
