@@ -2,7 +2,7 @@
 
 Two different things carry a version number:
 
-* **zpkg**, the package manager, uses CalVer (`YYYY.MM.DD`, e.g. `2026.11.28`).
+* **zpkg**, the package manager, uses CalVer (`YYYY.MM.DD`).
   On Arch it comes from `zpkg` (which replaces the former `zahlen-zpkg` package). `zpkg --version` shows it.
 * **the installed engine toolchain** uses the engine release tag
   (`0.7.0-gnu-x86_64-release`, `v0.7.0`). `zpkg list` shows it.
