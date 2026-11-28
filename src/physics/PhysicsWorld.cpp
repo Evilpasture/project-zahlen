@@ -414,6 +414,18 @@ void PhysicsWorld::Shutdown() {
     materialCount    = 0;
     materialCapacity = 0;
 
+    // Constraints are reference counted, and Jolt's ConstraintManager stores
+    // bare pointers: it never deletes them. PhysicsCommand::CreateConstraint
+    // hands the system the one reference it owns (`AddRef` then `AddConstraint`),
+    // so this is the only place that reference is ever released -- dropping the
+    // vector alone leaks every constraint for the life of the process.
+    if (system != nullptr) {
+        for (JPH::Constraint* constraint: system->GetConstraints()) {
+            system->RemoveConstraint(constraint);
+            constraint->Release();
+        }
+    }
+
     constraints.clear();
     constraintStates.clear();
     constraintGenerations.clear();
