@@ -7,8 +7,6 @@ It adds game logic as an application layer.
 
 Copy [`samples/FirstGameSample.cpp`](../samples/FirstGameSample.cpp) from the
 release tag matching your installed engine to your game directory as `main.cpp`.
-It is documentation only and is deliberately not a CMake target in this tree;
-examples must never be inputs to CI jobs.
 The sample positions the camera, creates a floor and a falling box, and closes
 on Escape.
 
