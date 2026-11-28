@@ -23,8 +23,8 @@ if (auto advanced = pipeline->AdvanceFrame(dt); !advanced.HasValue()) {
 
 All operations are synchronous on the single host/frame-owner thread. Do not
 pump events, run another simulation step or concurrently mutate the world
-between AdvanceFrame and FinishFrame. This is a camera/tool presentation seam,
-not an invitation to re-run engine physics or transform propagation.
+between AdvanceFrame and FinishFrame. This seam handles camera/tool presentation
+after physics and transform propagation.
 
 ## Order and state
 
@@ -51,7 +51,7 @@ infinite and NaN deltas are refused with InvalidDeltaTime. Zero is supported.
 CurrentFrame advances exactly once when a consumed frame completes or is
 cancelled, and once on a consumed frame-step failure, preserving the previous
 Tick failure-counting convention. Invalid protocol calls do not increment it.
-It is a consumed-frame index, not a count of GPU presentations.
+CurrentFrame counts consumed frames. GPU presentations do not affect it.
 
 CancelFrame does not roll back simulation. It discards the entire suffix and
 counts the consumed frame, without committing camera or transform presentation

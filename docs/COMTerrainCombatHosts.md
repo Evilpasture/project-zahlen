@@ -5,9 +5,9 @@
 heightfields through engine capabilities. `TerrainGeometry` contains the shared
 CPU algorithm.
 The host retains its engine reference, supports independent owners and scene
-clear, and republishes assets after device recreation. Replacement mesh
-ownership is attached before registration, since replacing an ownership
-component unregisters the preceding asset ID.
+clear, and republishes assets after device recreation. Attach replacement mesh
+ownership before registration; replacing the ownership component unregisters the
+preceding asset ID.
 
 `zahlen_vfx` (`VFX/CombatFX.hpp`) is an ordinary COM host policy object. It owns
 impact decals, procedural fallback textures, particles, rings and tracers,

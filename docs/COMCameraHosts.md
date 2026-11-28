@@ -33,7 +33,7 @@ InputSnapshot in the host, then `Apply(IEntities&, snapshot, dt)`. Apply does no
 seed or install anything. Physical input is sampled for the primary seat; like
 the native implementation it does not apply UI capture filtering. Hosts that
 own UI capture should suppress or replace the corresponding snapshot fields.
-This is consumer policy, not an engine device-injection API.
+The engine exposes no device-injection API.
 
 FreeCam::Drive(Camera&, settings, snapshot, dt) is also a standalone policy
 function: normalized movement, sprint, RMB-gated look or captured-mouse look,
@@ -57,9 +57,8 @@ frame being rendered. Bespoke hosts use the queryable IFramePipeline capability
 explicitly. See COMFramePipeline.md for protocol, cancellation and failure rules.
 
 Apply itself does not advance anything: a direct call before AdvanceFrame still
-reads the previous committed WorldTransform. Local target edits belong before
-AdvanceFrame, not between the halves, because propagation is not silently
-replayed.
+reads the previous committed WorldTransform. Make local target edits before
+AdvanceFrame. Propagation does not replay between frame halves.
 
 ## Tests
 

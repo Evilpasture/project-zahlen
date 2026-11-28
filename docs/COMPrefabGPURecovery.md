@@ -71,9 +71,9 @@ currently published image set.
 
 On success the owning Asset is updated in place. Same-device old textures are
 unloaded only after commit. After device recreation, old texture IDs are
-**discarded without unloading through the new renderer**, because those IDs
-are renderer-scoped and can be numerically reused. Never independently unload
-an old-generation manifest on a new-generation device.
+are renderer-scoped and can be numerically reused. Discard old texture IDs
+without unloading them through the new renderer. Never independently unload an
+old-generation manifest on a new-generation device.
 
 Unpublished GPU mesh/texture uploads roll back on error; the owner and cached
 prefab revision do not change. Material instances and morph data still use
@@ -103,8 +103,7 @@ submission. Separate `initial_skin_morph_frame` and
 `recovered_skin_morph_frame` integration tests remain enabled in the suite.
 Repeated frame submissions intermittently SIGSEGV on this VM, including an
 initial-frame diagnostic using the original upstream glTF Upload implementation
-and no replacement/reset. This is a known failing integration check, **not** a
-recovered-frame rendering pass; the precise underlying cause remains open.
-No injected NVIDIA hardware-device-loss or animation-playback conformance is
-claimed. Native compatibility entry points remain available; do not mix a
+and no replacement/reset. Recovered-frame rendering remains unverified, and the
+precise underlying cause remains open. No injected NVIDIA hardware-device-loss
+or animation-playback conformance is claimed. Native compatibility entry points remain available; do not mix a
 native mutable loader and a COM owning lease for the same virtual path.

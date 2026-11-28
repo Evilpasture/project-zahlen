@@ -23,10 +23,9 @@ zpkg list
 zpkg prefix                    # now the new toolchain's prefix
 ```
 
-`zpkg sync` reinstalls exactly the packages you currently have (plus their
-dependency closure) from the official release into the new toolchain id. It
-never guesses: a release that dropped or renamed a package fails loudly instead
-of silently shrinking your prefix. Flags:
+`zpkg sync` reinstalls the installed packages and their dependency closure from
+the official release into a new toolchain id. It fails if the release omits or
+renames an installed package. The active prefix remains unchanged. Flags:
 
 | Flag | Effect |
 |---|---|

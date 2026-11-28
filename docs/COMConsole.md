@@ -17,9 +17,9 @@ manifest. Registering a manifest does not attach components or allocate a
 parallel engine registry: the host attaches data through IEntities as usual.
 Non-POD roots (std::string/vector owners, opaque native runtime state) cannot be
 registered as COM components. They must remain engine-owned or host-owned; the
-generic ScriptBinder still reflects host-owned STL values locally. This is an
-intentional boundary, not a native inspection compatibility bridge. Metadata
-`types`/`type` can still describe a reflected type without granting storage access.
+generic ScriptBinder still reflects host-owned STL values locally. COM does not
+expose native inspection. Metadata `types`/`type` can describe a reflected type
+without granting storage access.
 
 GetRaw now enforces its documented **dynamic-only** contract. A guessed native
 family name cannot reveal a typed engine component behind the publication table.
@@ -56,8 +56,7 @@ are recorded in its application-owned GameConsole/history and printed to host
 logs. The engine owns neither the console nor a UI callback/context. A GUI host
 may display those entries in its own frame; Extras_ConsoleHost does so through
 HostUI, submits the real console output and reads back the rendered frame.
-If Console was not built, a supplied command fails explicitly rather than being
-silently ignored. Existing document, fallback, terrain and graphics watching
+The host reports an error for supplied commands when Console is unavailable. Existing document, fallback, terrain and graphics watching
 behavior otherwise stays unchanged.
 
 ## Boxed values, arrays and lifetime

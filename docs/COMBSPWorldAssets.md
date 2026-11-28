@@ -36,10 +36,9 @@ for (const auto& model: prepared->studioModels) {
 }
 ```
 
-On a later submodel failure, `session.importedAssets` still retains ownership of
-earlier successful textures. This is why there is no misleading multi-prefab
-"atomic" call: the current capability registers one prefab at a time. Despawn
-users and clear the prefab cache before unloading successful texture manifests.
+`session.importedAssets` retains ownership of previously uploaded textures after
+a later submodel failure. `UploadAsset` registers one prefab at a time. Despawn users and
+clear the prefab cache before unloading successful texture manifests.
 A cache hit returns no newly owned texture handles. As before, virtual path is
 cache identity; use another path for incompatible import options.
 

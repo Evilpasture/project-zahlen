@@ -88,8 +88,8 @@ interfaces are the CLI and store format.
 
 Build with a C++23 compiler and the dependencies listed above.
 
-The default store is `%LOCALAPPDATA%\zahlen`; `ZHLN_ROOT` overrides it. Four
-things behave differently, all of them because Windows has no POSIX file model:
+The default store is `%LOCALAPPDATA%\zahlen`; `ZHLN_ROOT` overrides it. Windows
+store behavior differs in these areas:
 
 * `shims` is refused. There is no `~/.local/bin` and no symlink to follow;
   `zpkg env --shell powershell` (or `cmd`) emits the export that puts the active
@@ -118,9 +118,8 @@ $ZHLN_ROOT/cache/<sha256>                                     # downloaded archi
 ```
 
 `$ZHLN_ROOT` defaults to `${XDG_DATA_HOME:-~/.local/share}/zahlen` on POSIX and
-`%LOCALAPPDATA%\zahlen` on Windows. `ACTIVE` is a text file, not a symlink,
-because Windows only creates symlinks in developer mode; on POSIX zpkg also
-maintains the relative `active` link for humans and tools that expect a path.
+`%LOCALAPPDATA%\zahlen` on Windows. `ACTIVE` stores the active toolchain id as
+text. POSIX stores also contain a relative `active` symlink.
 
 Store behavior:
 
@@ -187,8 +186,7 @@ $ zpkg install upstream:zahlen-gltf
 ```
 
 `--only a,b` is the same request written the other way, and takes the same
-closure. Naming a package and passing `--only` together is refused rather than
-merged, because the two spellings would then disagree about what was asked for.
+closure. zpkg rejects a package name combined with `--only`.
 
 The graph comes from the remote index when it carries one (`index.json` format 2,
 which `zpkg index` writes). A format-1 index names no dependencies, so zpkg
