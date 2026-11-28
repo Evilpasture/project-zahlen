@@ -1,0 +1,21 @@
+extends: existence
+message: "Remove promotional or trivializing qualifier ('%s')."
+level: error
+ignorecase: true
+tokens:
+  - "seamless(?:ly)?"
+  - "out of the box"
+  - "first-class"
+  - "zero[- ]boilerplate"
+  - "nothing to .{1,25} by hand"
+  - "never has to"
+  - "battle[- ]tested"
+  - "drop-in"
+  - "rock-solid"
+  - "cutting-edge"
+  - "effortless(?:ly)?"
+  - "straightforward(?:ly)?"
+  - "cleanly"
+  - "simply"
+  - "obviously"
+  - "of course"

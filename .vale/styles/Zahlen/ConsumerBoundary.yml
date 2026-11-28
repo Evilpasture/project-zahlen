@@ -1,0 +1,13 @@
+extends: existence
+message: "Do not expose internal CI scripts, sanitizer switches, or test runners ('%s') in user/package docs."
+level: error
+scope: raw
+nonword: true
+ignorecase: false
+tokens:
+  - '\bUSE_SANITIZERS\b'
+  - '\bZHLN_TEST_[A-Z0-9_]+\b'
+  - '\b(?:CI job|CI workflow|CI pipeline|CI lane|in CI)\b'
+  - "scripts/(?:test|check)-[A-Za-z0-9_.-]+"
+  - 'test-toolchain-install\.sh'
+  - 'check-release-consistency\.sh'

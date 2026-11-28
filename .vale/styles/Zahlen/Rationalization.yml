@@ -1,0 +1,16 @@
+extends: existence
+message: "Remove design rationalization or external comparison ('%s'); state the fact or rule only."
+level: error
+ignorecase: true
+tokens:
+  - "(?:the )?same model as"
+  - "(?:like|as) (?:pacman|apt|cargo|brew|npm)"
+  - "archlinux-keyring"
+  - "ubuntu-keyring"
+  - "browser root CAs?"
+  - "self-authenticating"
+  - "for the same reason"
+  - "which is why"
+  - "this is by design"
+  - "deliberately"
+  - "intentionally"

@@ -1,0 +1,13 @@
+extends: existence
+message: "Remove defensive antithesis phrasing ('%s'); state the behavior directly."
+level: error
+ignorecase: true
+tokens:
+  - "is a refusal,? not (?:an?|the) "
+  - "not an instruction to"
+  - "proves nothing"
+  - "(?:the )?whole point (?:of|is)"
+  - "(?:rather|instead) than silently"
+  - "by design,? not"
+  - "not by accident"
+  - "is a feature,? not a bug"

@@ -1,0 +1,6 @@
+extends: occurrence
+message: "Sentence exceeds 28 words; split it or delete rationale."
+scope: sentence
+level: warning
+max: 28
+token: '\b(\w+)\b'
