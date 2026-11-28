@@ -84,21 +84,22 @@ native resource object. Do not cache that result across operations/mutations.
 
 ## Packages and verification
 
-Zahlen::Scripting and Zahlen::Console are independently exported and neither
-links Zahlen::Lua. Lua is delivered as the `zahlen_plugin_lua` shared library
-(or linked explicitly by the Lua sandbox host/tests); installed Lua requires a
-system LuaJIT library, with no Lua headers exposed to Console consumers.
+Zahlen::Scripting and Zahlen::Console are exported separately. Neither links
+Zahlen::Lua. Lua is provided by the `zahlen_plugin_lua` shared library. Lua
+sandbox hosts and tests can link it directly. Installed Lua requires system
+LuaJIT. Console consumers do not need Lua headers.
 
-- Existing Console command tests use real renderer-free COM worlds, including
-  the unavailable-Lua patch diagnostic, find/entity dumps, matrix ranges and errors.
-- Script bridge test uses a POD manifest, fixed strings and fixed arrays through
-  COM, preserving scalar/nested/indexed mutation and sparse-set move/removal cases.
-- Five extra lifetime cases cover multi-level boxes, nested arrays, growth/moves,
-  reattachment/destruction, retained owner lifetime, cross-world rejection,
+- Console command tests use renderer-free COM worlds. They cover unavailable-Lua
+  diagnostics, find/entity dumps, matrix ranges and error handling.
+- The script bridge test uses a POD manifest, fixed strings and fixed arrays
+  through COM. It covers scalar, nested and indexed mutation, plus sparse-set
+  moves and removals.
+- Five lifetime cases cover multi-level boxes, nested arrays, growth and moves,
+  reattachment and destruction, retained owner lifetime, cross-world rejection,
   recursive boxed assignments, fixed strings and resource-owner write refusal.
-- A real Engine + Scene + Console + HostUI GPU test checks get/set/find, dynamic
-  raw isolation, body retention, submitted console output and nonblank capture.
-- The installed C++26 Console consumer links/runs the debugger and property edits.
+- An Engine, Scene, Console and HostUI GPU test covers get/set/find, dynamic raw
+  isolation, body retention, submitted console output and nonblank capture.
+- The installed C++26 Console consumer tests debugger and property edits.
 
 No engine scripting behavior, arbitrary native registry inspection or bulk ECS
 mapping is introduced. Native compatibility targets elsewhere remain explicitly

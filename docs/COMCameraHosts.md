@@ -63,11 +63,11 @@ replayed.
 
 ## Tests
 
-`Extras_CameraHosts` covers standalone fly math/capture/pause, main-camera
-seeding and opt-out, scene reset, sequential engine recreation, independent
-multi-camera orbit state and fly ownership, world-transform selection,
-zoom/pitch limits, smoothing/teleport, and explicit Application-layer composition
-through two actual empty-world engine frames. Tests do not inject device input
-and do not assert scene pixels. Native compatibility targets are separately
+`Extras_CameraHosts` covers standalone fly math, capture and pause. It tests
+main-camera seeding and opt-out, scene reset, sequential engine recreation,
+independent multi-camera orbit state, fly ownership and world-transform
+selection. It also covers zoom/pitch limits, smoothing, teleport and
+Application-layer composition across two actual empty-world engine frames. Tests
+do not inject device input and do not assert scene pixels. Native compatibility targets are separately
 build-checked; a COM build or empty-world frame is not a physics-follow timing
 acceptance test.

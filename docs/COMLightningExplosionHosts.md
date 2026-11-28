@@ -23,16 +23,16 @@ resetting phase. Ownership replacement precedes asset publication.
 
 Unlike the native adapter, this host does **not** overwrite global ambient
 exposure. Owned flash/impact light entities provide flashes without one host
-restoring settings over another host's effect. Ground/cloud positions are used
-as supplied, rather than silently discarding cloud X/Z.
+restoring settings over another host's effect. The host uses ground and cloud
+positions as supplied, including cloud X/Z.
 
 ## Explosion
 
 `Start`, `Spawn(SpawnInfo)` and `BeforeRender` return typed errors.
 `SpawnInfo::kind` selects the authored artillery or standard-fireball policy.
-The host preserves the real particle distributions, drag/gravity, fire/smoke
-billboard batches, four air fronts and ground ring, fading flash light,
-48-particle mesh-debris emitter, procedural DSP audio, and autonomous crater
+The host uses authored particle distributions, drag and gravity, fire/smoke
+billboards, four air fronts, a ground ring and a fading flash light. It also uses
+a 48-particle mesh-debris emitter, procedural DSP audio and autonomous crater
 projection/fade. Explosions do not apply blast impulses.
 
 The STL simulation vectors and procedural texture policy stay in private host

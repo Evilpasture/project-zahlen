@@ -13,13 +13,15 @@ configuration.
 
 ## Build Instructions
 
-For creative works, the build system expects Blender files in `./blender/` depending on your CMakeLists.txt.
-Blender itself is optional: `cmake/BlenderProbe.cmake` resolves it from `BLENDER_PATH`, then `PATH`, then the
-platform's own install locations, and reports the answer as `ZHLN_HAS_BLENDER`. Without it the cook graph
-carries no `.blend` extraction edge at all -- textures, fonts, glTF and the pak still cook -- so a tree with
-no `.blend` sources never needs Blender installed. Pass `-DZHLN_HAS_BLENDER=OFF` to skip them on a host that
-has Blender, or `-DZHLN_HAS_BLENDER=ON` to make a missing Blender a configure error.
-For compiled assets, the build system expects usually in resources/assets/ as an unofficial convention.
+Store Blender project files under `./blender/`; CMake uses that path when the
+project enables Blender asset cooking. `BlenderProbe.cmake` searches
+`BLENDER_PATH`, then `PATH`, then platform install locations. It sets
+`ZHLN_HAS_BLENDER` to report whether Blender was found.
+
+When Blender is unavailable, CMake omits `.blend` extraction steps. Textures,
+fonts, glTF assets and pak files still cook. Set `-DZHLN_HAS_BLENDER=OFF` to
+disable Blender support, or `-DZHLN_HAS_BLENDER=ON` to require it at configure
+time. The conventional location for compiled assets is `resources/assets/`.
 
 Run scripts/build.sh and fix every error you go along the way if you're missing dependencies.
 
@@ -55,7 +57,11 @@ remote-cache configuration.
 
 ## Architecture
 
-The optional source tree is split by role: `plugins/` contains asset formats and codecs, `extensions/` contains reusable engine subsystems plus network/platform I/O, and `gameplay/` contains domain-specific systems and project integrations. The existing top-level `modules/` remains reserved for Core C++ module interfaces.
+The optional source tree is split by role. `plugins/` contains asset formats
+and codecs. `extensions/` contains reusable engine subsystems and
+network/platform I/O. `gameplay/` contains domain-specific systems and project
+integrations. The top-level `modules/` directory is reserved for Core C++ module
+interfaces.
 
 For a detailed breakdown of the engine's architecture, frame loop execution order and deferred render graph topology, see [include/ARCHITECTURE.md](../include/ARCHITECTURE.md).
 

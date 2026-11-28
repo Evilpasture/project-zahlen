@@ -43,7 +43,7 @@ writer on the same entity. New native plan entries are not added to a pending
 frame's step snapshot.
 
 The delta and fixed-step batch cannot change between halves. The old Tick(dt)
-remains supported and simply advances then finishes through the same code.
+remains supported and advances and finishes through the same code.
 A second AdvanceFrame or Tick while a frame is active returns
 FramePipelineError::FrameInProgress, without consuming additional clock time.
 A finish/cancel without a ready frame returns NoPendingFrame. Negative,
@@ -105,9 +105,9 @@ the native Scene/document/HostUI or Discord engine-integration adapters.
 
 DefaultPreset's scene, orbiting light, emblem animation and popup remain. All
 mutable preset state is per-instance, including popup/animation settings and
-entity handles; a retained COM reference prevents stale handles from silently
-binding to a different engine allocation. ClearFallback releases that reference
-and resets host state; geometry remains engine scene-owned. The preset does not
+entity handles. A retained COM reference prevents stale handles from binding to
+a different engine allocation. ClearFallback releases that reference and resets
+host state; geometry remains engine scene-owned. The preset does not
 despawn geometry as a side effect of dropping UI state. The host explicitly
 clears/replaces scene contents when changing documents.
 
