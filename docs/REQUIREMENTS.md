@@ -1,6 +1,6 @@
 # Requirements
 
-Applies to the native Linux x86_64 packages in release v0.3.2. Use the
+Applies to the native Linux x86_64 packages in release v0.7.0. Use the
 requirements at the tag of the installed release.
 
 ## Build tools
@@ -8,7 +8,7 @@ requirements at the tag of the installed release.
 | Task | Requirements |
 | --- | --- |
 | Build a game against installed packages | GCC with C++26 `-freflection` support (GNU >= 16.1.1; release compiler: GCC 16.2.0), CMake >= 3.28, a build tool (Ninja recommended), and the needed packages installed with `zpkg`. |
-| Build Zahlen from source | GCC 16.2.0 for the release workflow, CMake >= 3.28, a build tool, and the dependencies provisioned by the [development containers](../docker/README.md). |
+| Build Zahlen from source | GCC 16.2.0, CMake >= 3.28, a build tool, and the dependencies listed in [development setup](DEVELOPMENT.md). |
 | Run a compiled game | No build tools. See runtime and Vulkan requirements below. |
 
 The installed CMake packages check compiler family, architecture, libstdc++

@@ -6,9 +6,8 @@ For command syntax, see [Commands](#commands).
 
 ## Version and trust
 
-`zpkg --version` is the manager's own **CalVer** (`YYYY.MM.DD`, from
-`utils/zpkg/CMakeLists.txt`); it is not the engine version. The installed engine
-toolchain is shown by `zpkg list` / `zpkg info`.
+`zpkg --version` reports the manager's own CalVer (`YYYY.MM.DD`). The installed
+engine toolchain is shown by `zpkg list` / `zpkg info`.
 
 The project signing key is pinned at
 [`packaging/keys/zahlen-release.pub`](../../packaging/keys/zahlen-release.pub)
@@ -210,7 +209,7 @@ download of everything that is not in the closure.
 ```
 
 The signature covers the exact bytes of the file named before the extension.
-The project key is built into `zpkg` (see `CMakeLists.txt`) and pinned at
+The project key is built into `zpkg` and pinned at
 [`packaging/keys/`](../../packaging/keys/README.md). Other publishers' keys are
 trusted per user with `zpkg key add <key.pub> --name <who>`. Multiple signer
 lines are allowed; a signature from any trusted key is accepted. A planned key
@@ -223,9 +222,6 @@ openssl pkey -in release-key.pem -pubout -outform DER | tail -c 32 | base64 > ke
 openssl pkeyutl -sign -inkey release-key.pem -rawin -in SHA256SUMS -out sig.bin
 printf '%s ' "$(fingerprint)" && base64 sig.bin
 ```
-
-`scripts/test-toolchain-install.sh` does exactly this in CI, then installs with
-`--require-signatures` and checks that a tampered `SHA256SUMS` is rejected.
 
 For publishing, see [package metadata](../../packaging/README.md#publishing-metadata).
 
