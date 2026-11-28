@@ -35,13 +35,12 @@ are decoded to owned pixels. Missing/undecodable images retain the native
 best-effort fallback policy; malformed containers/buffer structure fail.
 Unsupported extensions remain advisory, including required extensions.
 
-Material mappings, sampler/UV transforms, emissive scaling, texture resizing
-and lights match the native loader. Morph weights use node-over-mesh precedence;
-only the first four position morph targets are used.
-
-Linear easing is supported. Cubic animation support is incomplete. Cubic weight
-data uses compact value-only storage; cubic TRS tracks store
-tangent/value/tangent triples.
+The established material mappings, sampler/UV transforms, emissive scaling,
+texture resizing, lights, node-over-mesh morph weights and first-four-position
+morph policy are shared with the native loader. Existing partial playback
+limitations remain: linear easing and incomplete cubic support are not
+changed into a conformance claim. Cubic weight data retains compact value-only
+storage; cubic TRS tracks retain tangent/value/tangent triples.
 
 ## Upload and ownership
 

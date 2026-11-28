@@ -96,12 +96,14 @@ things behave differently, all of them because Windows has no POSIX file model:
   toolchain on `PATH` instead.
 * Archives carrying symbolic links need developer mode or elevation, which zpkg
   reports when unavailable. Hard links fall back to a copy.
-* Windows does not apply archive file modes. It reports `rw-rw-rw-` for files
-  and supports only the read-only attribute. Executability comes from the file
-  extension, and installed files remain replaceable.
-* Windows paths past `MAX_PATH` use the extended-length form. `CreateDirectoryW`
-  creates directories, and `_wfopen` opens files. `std::ofstream` converts paths
-  to the ANSI code page.
+* File modes are not applied. Windows reports the same `rw-rw-rw-` for every
+  file and can only express the read-only attribute, so an archive's `0755` is
+  ignored -- executability there comes from the extension. The invariant zpkg
+  keeps instead is that installed files stay replaceable.
+* Paths past `MAX_PATH` use the extended-length form, which only some Win32
+  entry points accept, so directory creation walks components with
+  `CreateDirectoryW` and file access goes through `_wfopen` rather than
+  `std::ofstream` (which would also convert the path to the ANSI code page).
 
 ## Store layout
 
@@ -116,8 +118,9 @@ $ZHLN_ROOT/cache/<sha256>                                     # downloaded archi
 ```
 
 `$ZHLN_ROOT` defaults to `${XDG_DATA_HOME:-~/.local/share}/zahlen` on POSIX and
-`%LOCALAPPDATA%\zahlen` on Windows. `ACTIVE` stores the selected toolchain id
-as text. POSIX stores also contain a relative `active` symlink.
+`%LOCALAPPDATA%\zahlen` on Windows. `ACTIVE` is a text file, not a symlink,
+because Windows only creates symlinks in developer mode; on POSIX zpkg also
+maintains the relative `active` link for humans and tools that expect a path.
 
 Store behavior:
 
@@ -127,11 +130,11 @@ Store behavior:
 * **Toolchain selection.** Each toolchain has its own directory. `zpkg use`
   updates `ACTIVE` for subsequent lookups; it does not rewrite existing binaries
   or their runtime search paths.
-* **Archive validation.** Payload paths must be under `usr/`. Validation rejects
-  absolute paths, `..`, backslashes, drive letters, colons, control characters,
-  devices, duplicate files and symlinks that prefix another member. zpkg
-  validates the archive before extraction, then checks for changes during the
-  extraction pass.
+* **Archive validation.** Payload paths must be under `usr/`. Every tar
+  member is validated before extraction: absolute paths, `..`, backslashes, drive letters, colons, control
+  characters, devices, duplicate files, and any symlink that is a prefix of
+  another member are all refused. The archive is validated in a first pass and
+  extracted in a second, which also detects a file that changed between them.
 * **Package removal.** `remove --package` uses the file list recorded at install
   time to select files for deletion.
 * **The store is relocatable.** `ACTIVE` holds an id, the POSIX link is relative,
@@ -163,18 +166,19 @@ Install options: `--from <remote>`, `--version <tag>`, `--only a,b`, `--toolchai
 `-s/--require-signatures`, `--ignore-missing`, `--force`, `--quiet`.
 Sync options: `--from`, `--version`, `--activate`, `--dry-run`, `--force`, `--quiet`.
 
-`sync` installs into a new toolchain directory. It reads package names from the
-active toolchain, then resolves dependencies against the target release's signed
-`index.json`. Without `--activate`, it leaves `ACTIVE` unchanged and prints the
-`zpkg use <id>` command. With `--activate`, it switches and warns that existing
-binaries remain linked to their build toolchain.
+`sync` never updates a toolchain in place. It reads the package names recorded
+in the active toolchain, resolves their closure against the target release's
+signed `index.json`, and installs into that release's own immutable toolchain
+directory. Without `--activate` it leaves `ACTIVE` alone and prints the
+`zpkg use <id>` command; with `--activate` it switches and warns that binaries
+already linked keep the toolchain they were built against.
 
 ## What a name selects
 
 `install <remote>:<name>` installs `name` **and its closure**, dependencies
-first. `<name>` can name a package (`zahlen-gltf`), component (`GLTF`) or
-exported target (`Zahlen::GLTF`). If the remote does not publish the name, zpkg
-lists its available names. Omitting the name installs the whole toolchain,
+first. `<name>` may be a package (`zahlen-gltf`), a component (`GLTF`) or an
+exported target (`Zahlen::GLTF`); a name the remote does not publish is an error
+that lists what it does publish. Omitting the name installs the whole toolchain,
 including all available packages.
 
 ```
@@ -223,11 +227,11 @@ For publishing, see [package metadata](../../packaging/README.md#publishing-meta
 
 ## Tests
 
-`utils/zpkg/tests/main.cpp` builds with the project and runs under `ctest`. Tests
-cover SHA-256, base64 and all three `SHA256SUMS` formats. They check strict JSON
-refusals, index round trips, archive extraction and fifteen hostile archives.
-Other cases cover the store lifecycle and lock, checksum/signature policy with
-Ed25519 test keys, `file://` remotes and path handling.
+`utils/zpkg/tests/main.cpp` builds with the project and runs under `ctest`. It
+covers the SHA-256 and base64 primitives, all three `SHA256SUMS` dialects, strict
+JSON refusals, an index round trip, archive extraction and fifteen hostile
+archives, the store lifecycle and its lock, checksum/signature policy with real
+ed25519 keys, remotes over `file://`, and the path rules.
 
 Signature test coverage depends on whether the build includes OpenSSL.
 

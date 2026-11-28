@@ -30,9 +30,9 @@ positions as supplied, including cloud X/Z.
 
 `Start`, `Spawn(SpawnInfo)` and `BeforeRender` return typed errors.
 `SpawnInfo::kind` selects the authored artillery or standard-fireball policy.
-The host uses authored particle distributions, drag and gravity, fire/smoke
-billboards, four air fronts, a ground ring and a fading flash light. It also uses
-a 48-particle mesh-debris emitter, procedural DSP audio and autonomous crater
+The host preserves the real particle distributions, drag/gravity, fire/smoke
+billboard batches, four air fronts and ground ring, fading flash light,
+48-particle mesh-debris emitter, procedural DSP audio, and autonomous crater
 projection/fade. Explosions do not apply blast impulses.
 
 The STL simulation vectors and procedural texture policy stay in private host

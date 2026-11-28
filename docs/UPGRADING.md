@@ -10,8 +10,7 @@ Two different things carry a version number:
 Upgrading the PKGBUILD bumps **only the manager**. It does not touch the
 per-user store at `$ZHLN_ROOT/store/<toolchain-id>/`, so an engine upgrade is a
 separate step. Each release is installed into its own immutable toolchain
-directory. Existing toolchains are not overwritten in place. `zpkg install`
-leaves the active toolchain unchanged.
+directory; nothing is overwritten in place, and `zpkg install` leaves the active toolchain unchanged.
 
 ## Normal upgrade
 

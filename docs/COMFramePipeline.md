@@ -105,9 +105,9 @@ the native Scene/document/HostUI or Discord engine-integration adapters.
 
 DefaultPreset's scene, orbiting light, emblem animation and popup remain. All
 mutable preset state is per-instance, including popup/animation settings and
-entity handles. A retained COM reference prevents stale handles from binding to
-a different engine allocation. ClearFallback releases that reference and resets
-host state; geometry remains engine scene-owned. The preset does not
+entity handles; a retained COM reference prevents stale handles from silently
+binding to a different engine allocation. ClearFallback releases that reference
+and resets host state; geometry remains engine scene-owned. The preset does not
 despawn geometry as a side effect of dropping UI state. The host explicitly
 clears/replaces scene contents when changing documents.
 

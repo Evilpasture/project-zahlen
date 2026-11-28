@@ -7,7 +7,7 @@ requirements at the tag of the installed release.
 
 | Task | Requirements |
 | --- | --- |
-| Build a game against installed packages | GCC >= 16.1.1 with `-freflection` (release builds use 16.2.0), CMake >= 3.28, Ninja recommended, and packages installed with `zpkg`. |
+| Build a game against installed packages | GCC with C++26 `-freflection` support (GNU >= 16.1.1; release compiler: GCC 16.2.0), CMake >= 3.28, a build tool (Ninja recommended), and the needed packages installed with `zpkg`. |
 | Build Zahlen from source | GCC 16.2.0 for the release workflow, CMake >= 3.28, a build tool, and the dependencies provisioned by the [development containers](../docker/README.md). |
 | Run a compiled game | No build tools. See runtime and Vulkan requirements below. |
 
