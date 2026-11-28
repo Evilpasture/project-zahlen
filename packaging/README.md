@@ -41,8 +41,9 @@ SHA256SUMS
 ```
 
 `<toolchain-id>` looks like `0.x.x-xxxxxxx-gcc-16.x.x-x86_64-release` and is
-derived from the same inputs as the ABI hash. Packaged toolchains are
-release-only; sanitizer-enabled builds cannot be packaged.
+derived from the same inputs as the ABI hash. Release archives use the Release
+configuration with `USE_SANITIZERS=OFF`; sanitizer-enabled builds remain
+available for in-tree testing.
 
 | Component / config suffix | Installed target | Requires |
 |---|---|---|
@@ -128,9 +129,9 @@ builds, while SDK consumers own their process allocator).
 Each config checks the compiler family, architecture, libstdc++ dual-ABI switch
 (`_GLIBCXX_USE_CXX11_ABI`), absence of `_GLIBCXX_DEBUG`, and compiles
 `cmake/probes/pr125280-static-member.cpp` under `-std=c++26 -freflection`.
-Packaged toolchains are release-only; sanitizer-enabled builds are rejected by
-the packaging configuration. The ABI check does **not** pin a compiler patch
-version, git commit hash, `__GLIBCXX__` release date, or consumer
+Release archives use `USE_SANITIZERS=OFF`; sanitizer-enabled in-tree builds
+still configure the package targets for testing. The ABI check does **not** pin a
+compiler patch version, git commit hash, `__GLIBCXX__` release date, or consumer
 `CMAKE_BUILD_TYPE`; COM input chains verify struct layouts at runtime via
 `LayoutHash`.
 

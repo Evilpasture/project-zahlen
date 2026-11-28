@@ -23,10 +23,6 @@ endif()
 if(TARGET zahlen_serialization)
     find_package(simdjson CONFIG REQUIRED)
 endif()
-if(USE_SANITIZERS)
-    message(FATAL_ERROR
-        "Toolchain packaging is release-only; configure with -DUSE_SANITIZERS=OFF")
-endif()
 
 # Packaged toolchains are release builds only. Keep the profile in metadata for
 # consumers that inspect toolchain descriptors, but do not expose a consumer-side
