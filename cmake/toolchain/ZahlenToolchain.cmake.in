@@ -3,38 +3,85 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-# Select the matching GNU compiler major unless the consumer explicitly
-# supplied one. The installed package config performs the ABI and reflection
-# checks after CMake identifies the compiler.
-if(NOT DEFINED CMAKE_CXX_COMPILER)
+# Select a suitable compiler unless the consumer specified CMAKE_CXX_COMPILER
+# or CXX. Prefer the distro's default g++ (Arch/Fedora/Gentoo); if it is below
+# the supported floor, discover version-suffixed binaries (Ubuntu/Debian).
+if(NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED ENV{CXX})
     if(NOT "@CMAKE_CXX_COMPILER_ID@" STREQUAL "GNU")
         message(FATAL_ERROR
             "ZahlenToolchain.cmake can auto-select only GNU C++; "
-            "set CMAKE_CXX_COMPILER explicitly for @CMAKE_CXX_COMPILER_ID@")
+            "set CMAKE_CXX_COMPILER or CXX explicitly for @CMAKE_CXX_COMPILER_ID@")
     endif()
 
-    find_program(_zahlen_cxx_compiler NAMES g++-@ZHLN_TOOLCHAIN_COMPILER_MAJOR@ g++)
+    set(_zahlen_cxx_compiler "")
+    find_program(_zahlen_default_cxx NAMES g++)
+    if(_zahlen_default_cxx)
+        execute_process(
+            COMMAND "${_zahlen_default_cxx}" -dumpfullversion
+            OUTPUT_VARIABLE _zahlen_default_version
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _zahlen_default_result
+            ERROR_QUIET)
+        if("${_zahlen_default_result}" STREQUAL "0" AND
+           _zahlen_default_version VERSION_GREATER_EQUAL "@ZHLN_TOOLCHAIN_MIN_GCC_VERSION@")
+            set(_zahlen_cxx_compiler "${_zahlen_default_cxx}")
+        endif()
+    endif()
+
+    # Search every PATH directory for g++-<version> instead of assuming Debian
+    # naming or hard-coding the newest known GCC major. Pick the newest candidate
+    # that meets the floor when the unversioned compiler is too old or absent.
+    if(NOT _zahlen_cxx_compiler)
+        file(TO_CMAKE_PATH "$ENV{PATH}" _zahlen_path_dirs)
+        set(_zahlen_best_version "")
+        foreach(_zahlen_path_dir IN LISTS _zahlen_path_dirs)
+            if(NOT _zahlen_path_dir)
+                continue()
+            endif()
+            file(GLOB _zahlen_versioned_candidates LIST_DIRECTORIES FALSE
+                "${_zahlen_path_dir}/g++-*")
+            foreach(_zahlen_candidate IN LISTS _zahlen_versioned_candidates)
+                get_filename_component(_zahlen_candidate_name "${_zahlen_candidate}" NAME)
+                if(NOT _zahlen_candidate_name MATCHES "^g\\+\\+-[0-9]+([.][0-9]+)*$")
+                    continue()
+                endif()
+                execute_process(
+                    COMMAND "${_zahlen_candidate}" -dumpfullversion
+                    OUTPUT_VARIABLE _zahlen_candidate_version
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    RESULT_VARIABLE _zahlen_candidate_result
+                    ERROR_QUIET)
+                if("${_zahlen_candidate_result}" STREQUAL "0" AND
+                   _zahlen_candidate_version VERSION_GREATER_EQUAL "@ZHLN_TOOLCHAIN_MIN_GCC_VERSION@" AND
+                   (NOT _zahlen_best_version OR
+                    _zahlen_candidate_version VERSION_GREATER _zahlen_best_version))
+                    set(_zahlen_cxx_compiler "${_zahlen_candidate}")
+                    set(_zahlen_best_version "${_zahlen_candidate_version}")
+                endif()
+            endforeach()
+        endforeach()
+    endif()
+
     if(NOT _zahlen_cxx_compiler)
         message(FATAL_ERROR
-            "Zahlen requires matching GNU C++ @ZHLN_TOOLCHAIN_COMPILER_MAJOR@ with reflection support. "
-            "Install g++-@ZHLN_TOOLCHAIN_COMPILER_MAJOR@, or set CMAKE_CXX_COMPILER explicitly.")
+            "Zahlen requires GNU C++ >= @ZHLN_TOOLCHAIN_MIN_GCC_VERSION@ with static reflection support.\n"
+            "No suitable compiler was found on PATH. Install a supported GCC or set "
+            "CMAKE_CXX_COMPILER (or CXX) explicitly.")
     endif()
-    execute_process(
-        COMMAND "${_zahlen_cxx_compiler}" -dumpfullversion -dumpversion
-        OUTPUT_VARIABLE _zahlen_cxx_version
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _zahlen_cxx_version_result)
-    if(NOT _zahlen_cxx_version_result EQUAL 0 OR
-       NOT _zahlen_cxx_version MATCHES "^@ZHLN_TOOLCHAIN_COMPILER_MAJOR@([.]|$)")
-        message(FATAL_ERROR
-            "Zahlen requires matching GNU C++ @ZHLN_TOOLCHAIN_COMPILER_MAJOR@, but "
-            "${_zahlen_cxx_compiler} reports '${_zahlen_cxx_version}'. "
-            "Install a matching compiler or set CMAKE_CXX_COMPILER explicitly.")
-    endif()
+
     set(CMAKE_CXX_COMPILER "${_zahlen_cxx_compiler}" CACHE FILEPATH "C++ compiler for Zahlen projects")
     unset(_zahlen_cxx_compiler)
-    unset(_zahlen_cxx_version)
-    unset(_zahlen_cxx_version_result)
+    unset(_zahlen_default_cxx)
+    unset(_zahlen_default_version)
+    unset(_zahlen_default_result)
+    unset(_zahlen_path_dirs)
+    unset(_zahlen_best_version)
+    unset(_zahlen_path_dir)
+    unset(_zahlen_versioned_candidates)
+    unset(_zahlen_candidate)
+    unset(_zahlen_candidate_name)
+    unset(_zahlen_candidate_version)
+    unset(_zahlen_candidate_result)
 endif()
 
 set(CMAKE_CXX_STANDARD 26)

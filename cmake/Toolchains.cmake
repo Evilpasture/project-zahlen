@@ -65,10 +65,10 @@ file(MAKE_DIRECTORY "${ZHLN_TOOLCHAIN_METADATA_DIR}")
 file(WRITE "${ZHLN_TOOLCHAIN_METADATA_DIR}/toolchain.json"
     "{\"format\":1,\"id\":\"${ZHLN_TOOLCHAIN_ID}\",\"version\":\"${PROJECT_VERSION}\",\"commit\":\"${ZHLN_GIT_HASH}\",\"compiler\":\"${CMAKE_CXX_COMPILER_ID}\",\"compiler_version\":\"${CMAKE_CXX_COMPILER_VERSION}\",\"processor\":\"${CMAKE_SYSTEM_PROCESSOR}\",\"profile\":\"${ZHLN_TOOLCHAIN_PROFILE}\",\"abi\":\"${ZHLN_TOOLCHAIN_ABI}\"}\n")
 
-string(REGEX MATCH "^[0-9]+" ZHLN_TOOLCHAIN_COMPILER_MAJOR "${CMAKE_CXX_COMPILER_VERSION}")
-if(NOT ZHLN_TOOLCHAIN_COMPILER_MAJOR)
-    message(FATAL_ERROR "Cannot determine compiler major version for ZahlenToolchain.cmake")
-endif()
+# Reflection is available in supported GCC 16 releases; the consumer's actual
+# compiler is then checked for ABI compatibility and the PR 125280 fix by the
+# installed package config rather than being pinned to the builder's version.
+set(ZHLN_TOOLCHAIN_MIN_GCC_VERSION 16.1.1)
 configure_file(
     "${PROJECT_SOURCE_DIR}/cmake/toolchain/ZahlenToolchain.cmake.in"
     "${ZHLN_TOOLCHAIN_METADATA_DIR}/ZahlenToolchain.cmake"
