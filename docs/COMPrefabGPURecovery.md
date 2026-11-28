@@ -41,13 +41,14 @@ Document and the owning Asset from the successful initial Upload:
 ```cpp
 // engine is a host-held COM::Ref<COM::IEngine>.
 auto document = GLTF::Read(path, options, engine->Assets());
-auto asset = GLTF::Upload(*engine->Assets(), *engine->Graphics(), *document);
+auto asset    = GLTF::Upload(*engine->Assets(), *engine->Graphics(), *document);
 // Spawn, retain entity IDs, run normal host loop.
 
 // In the host loop, before the next animation/render step:
 if (asset->deviceGeneration != engine->DeviceGeneration()) {
     auto rebuilt = GLTF::RebuildGPUResources(*engine.Get(), *document, *asset);
-    if (!rebuilt) { /* stop rendering this asset and handle/retry the error */ }
+    if (!rebuilt) { /* stop rendering this asset and handle/retry the error */
+    }
 }
 ```
 
@@ -71,7 +72,7 @@ currently published image set.
 
 On success the owning Asset is updated in place. Same-device old textures are
 unloaded only after commit. After device recreation, old texture IDs are
-are renderer-scoped and can be numerically reused. Discard old texture IDs
+renderer-scoped and can be numerically reused. Discard old texture IDs
 without unloading them through the new renderer. Never independently unload an
 old-generation manifest on a new-generation device.
 
