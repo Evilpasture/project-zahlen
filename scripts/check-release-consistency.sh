@@ -16,7 +16,7 @@
 #   scripts/check-release-consistency.sh \
 #       --assets dist/packages --tools dist/tools \
 #       --notes dist/release-notes.md --asset-list dist/asset-names.txt \
-#       --versions --date 2026.11.25 --zpkg dist/tools/zpkg-linux-x86_64
+#       --versions --date 2026.11.28 --zpkg dist/tools/zpkg-linux-x86_64
 #
 # --assets and --tools may be the same flat directory (what `gh release
 # download` produces). Every check runs and all failures are reported together.

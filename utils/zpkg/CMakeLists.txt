@@ -20,7 +20,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 # CalVer format: YYYY.MM.DD. Also update packaging/arch/PKGBUILD's pkgver.
-project(zpkg VERSION 2026.11.25 LANGUAGES CXX)
+project(zpkg VERSION 2026.11.28 LANGUAGES CXX)
 message(STATUS "zpkg: CalVer ${PROJECT_VERSION}")
 
 # C++23, not C++20: the error path is std::expected (see include/zpkg/zpkg.hpp),
