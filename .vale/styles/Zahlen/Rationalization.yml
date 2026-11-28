@@ -1,16 +1,18 @@
 extends: existence
 message: "Remove design rationalization or external comparison ('%s'); state the fact or rule only."
 level: error
+nonword: true
 ignorecase: true
 tokens:
-  - "(?:the )?same model as"
-  - "(?:like|as) (?:pacman|apt|cargo|brew|npm)"
-  - "archlinux-keyring"
-  - "ubuntu-keyring"
-  - "browser root CAs?"
-  - "self-authenticating"
-  - "for the same reason"
-  - "which is why"
-  - "this is by design"
-  - "deliberately"
-  - "intentionally"
+  - '\b(?:the )?same model as\b'
+  - '\b(?:like|as|similar to) (?:pacman|apt(?:-get)?|cargo|brew|homebrew|npm|yarn|pnpm|pip|vcpkg|conan|nix|flatpak|dnf|yum|apk)\b'
+  - '\b(?:archlinux|ubuntu|debian)-keyring\b'
+  - '\bbrowser root CAs?\b'
+  - '\bself-authenticating\b'
+  - '\bfor the same reason\b'
+  - '\b(?:this|that|which) is why\b'
+  - '\b(?:the )?reason (?:for this|why) is\b'
+  - '\b(?:this is |it is )?by design\b'
+  - '\bon purpose\b'
+  - '\b(?:deliberate(?:ly)?|intentional(?:ly)?)\b'
+  - '\bas opposed to\b'

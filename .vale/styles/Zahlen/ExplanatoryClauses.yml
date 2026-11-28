@@ -1,17 +1,21 @@
 extends: existence
 message: "Remove explanatory subordinate clause ('%s'). State the direct fact or command only; never explain the mechanism."
 level: error
+nonword: true
 ignorecase: true
 tokens:
-  - "which ensures that"
-  - "thereby allowing"
-  - "in order to"
-  - "which means that"
-  - "because it"
-  - "since it"
-  - "so that"
-  - "designed to"
-  - "meant to"
-  - "allows you to"
-  - "enables you to"
-  - "giving you the ability to"
+  - '\b(?:which )?ensur(?:es?|ing) that\b'
+  - '\bthereby (?:allowing|enabling|ensuring|preventing|avoiding|making)\b'
+  - '\bwhich means(?: that)?\b'
+  - '\bwhich (?:allows|enables|lets|permits|prevents|makes)\b'
+  - '\bbecause\b(?! of\b)'
+  - '\bsince (?:it|they|this|that|these|those|the|there|[a-z]+ing)\b'
+  - '\bso that\b'
+  - '(?<!, )\bso (?:it|they|this|these|those|you|we) (?:can|could|will|would|may|might|do|does|did|stay|keep|remain|survive|avoid|prevent|receive|have|are)\b'
+  - '\b(?:designed|meant|intended) to\b'
+  - '\b(?:allows|enables|permits) (?:you|users?|developers?|callers?|hosts?|applications?|the (?:user|developer|caller|host|engine|app|application)) to\b'
+  - '\b(?:allows|enables) for\b'
+  - '\blets (?:you|the (?:user|developer|caller|host))\b'
+  - '\bgiv(?:es?|ing) (?:you|users?|developers?|callers?|the (?:user|developer|caller|host)) the ability to\b'
+  - '\bprovid(?:es?|ing) the ability to\b'
+  - '\bserves to\b'

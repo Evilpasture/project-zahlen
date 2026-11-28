@@ -6,9 +6,23 @@ action:
   name: replace
 swap:
   baked into: embedded in
+  baked in: embedded
   in order to: to
   make sure: verify
+  makes sure: verifies
+  making sure: verifying
   is able to: can
   are able to: can
+  was able to: could
+  were able to: could
   utilize: use
+  utilizes: uses
+  utilized: used
+  utilizing: using
   leverage: use
+  leverages: uses
+  leveraged: used
+  leveraging: using
+  prior to: before
+  in the event that: if
+  please note: note
