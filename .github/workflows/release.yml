@@ -513,8 +513,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           export PATH="${HOME}/.local/bin:${PATH}"
-          previous=$(gh release list --limit 2 --exclude-drafts --exclude-prereleases \
-            --json tagName --jq '.[1].tagName')
+          previous=$(gh release list --limit 10 --exclude-drafts --exclude-pre-releases \
+            --json tagName --jq 'map(select(.tagName != "'"${RELEASE_TAG}"'"))[0].tagName')
           test -n "${previous}"
           echo "previous release: ${previous}"
           mkdir -p prev-dist
@@ -527,8 +527,6 @@ jobs:
           zpkg install prev-dist --require-checksums --require-signatures
           zpkg list
 
-          # Add the current project key before syncing to this release.
-          zpkg key add packaging/keys/zahlen-release.pub --name "zahlen release"
           zpkg sync --version "${RELEASE_TAG}" --activate
           zpkg list
           expected=$(sed -n 's/.*"id":"\([^"]*\)".*/\1/p' dist/toolchain.json)
