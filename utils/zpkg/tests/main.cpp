@@ -876,7 +876,13 @@ void TestChecksumAndSignaturePolicy() {
     const fs::path keyFile = directory / "publisher.pub";
     Require(ZHLN::WriteFile(keyFile, ZHLN::Base64Encode(key.publicKey.data(), key.publicKey.size()) + "\n"));
     Require(store.KeyAdd(keyFile, "tester"));
-    Expect(Take(store.Keys()).size() == 1);
+    const std::string fingerprint = ZHLN::KeyFingerprint(key.publicKey);
+    bool               listed      = false;
+    for (const auto& [known, name]: Take(store.Keys())) {
+        if (known == fingerprint && name == "tester")
+            listed = true;
+    }
+    Expect(listed);
 
     SignSums(output, key);
     ZHLN::InstallOptions signedOptions;
