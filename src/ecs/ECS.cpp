@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <ecs/ECS.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstring>
+#include <ecs/ECS.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -14,9 +14,9 @@ namespace ZHLN::ECS {
 
 namespace {
 
-ZHLN::Mutex                         s_FamilyMutex {};
-uint32_t                            s_TypeCounter = 0;
-HashMap<uint32_t, uint32_t>         s_HashToDense;
+ZHLN::Mutex                 s_FamilyMutex {};
+uint32_t                    s_TypeCounter = 0;
+HashMap<uint32_t, uint32_t> s_HashToDense;
 // Node-based storage keeps references stable across insertions and rehashes.
 // The map and per-registry type metadata both refer to these owned strings.
 std::unordered_set<std::string>     s_FamilyNames;
@@ -36,7 +36,7 @@ auto ReallocAligned(std::pmr::memory_resource* memory, void* oldPtr, size_t oldS
     return newPtr;
 }
 
-}
+} // namespace
 
 auto ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept -> uint32_t {
     return ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t {
@@ -55,7 +55,7 @@ void Registry::MapNameToFamilyID(std::string_view name, uint32_t id) noexcept {
 
 auto Registry::InternAndMapNameToFamilyID(std::string_view name, uint32_t id) noexcept -> std::string_view {
     return ZHLN::Lock(s_FamilyMutex, [&] -> std::string_view {
-        const auto entry = s_FamilyNames.emplace(name).first;
+        const auto             entry      = s_FamilyNames.emplace(name).first;
         const std::string_view stableName = *entry;
         s_NameToFamilyID.Insert(stableName, id);
         return stableName;
@@ -63,20 +63,16 @@ auto Registry::InternAndMapNameToFamilyID(std::string_view name, uint32_t id) no
 }
 
 auto Registry::GetFamilyIDFromName(std::string_view name) noexcept -> uint32_t {
-    return ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t {
-        return s_NameToFamilyID.Find(name).value_or(0xFFFFFFFFu);
-    });
+    return ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t { return s_NameToFamilyID.Find(name).value_or(0xFFFFFFFFu); });
 }
-
 
 SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor):
     SparseSet(elementSize, alignment, syncPtr, destructor, nullptr) {
 }
 
-SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor,
-                     std::pmr::memory_resource* memory):
-    _memory(memory != nullptr ? memory : std::pmr::get_default_resource()),
-    _elementSize(elementSize), _alignment(alignment), _sync(syncPtr), _destructor(destructor) {
+SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor, std::pmr::memory_resource* memory):
+    _memory(memory != nullptr ? memory : std::pmr::get_default_resource()), _elementSize(elementSize), _alignment(alignment), _sync(syncPtr),
+    _destructor(destructor) {
 }
 
 SparseSet::~SparseSet() {
@@ -181,8 +177,8 @@ void SparseSet::Remove(Entity entity) {
     if (!Contains(entity)) {
         return;
     }
-    uint32_t denseIdx = _sparse[entity.index];
-    void* component = _data + (denseIdx * _elementSize);
+    uint32_t denseIdx  = _sparse[entity.index];
+    void*    component = _data + (denseIdx * _elementSize);
     if (_destructor != nullptr) {
         _destructor(component);
     }
@@ -255,14 +251,10 @@ auto SparseSet::GetEntityView(const void* owner) const noexcept -> BufferView {
     return view;
 }
 
-
 Registry::Registry(): Registry(nullptr) {
 }
 
-Registry::Registry(std::pmr::memory_resource* memory):
-    _memory(memory != nullptr ? memory : std::pmr::get_default_resource()), _typeInfo(_memory) {
-    sync.viewExportCount.store(0, std::memory_order::relaxed);
-    std::memset(&sync.shadowLock, 0, sizeof(sync.shadowLock));
+Registry::Registry(std::pmr::memory_resource* memory): _memory(memory != nullptr ? memory : std::pmr::get_default_resource()), _typeInfo(_memory) {
 }
 
 // Component sets live in the same resource as all of their backing buffers.
@@ -283,7 +275,7 @@ Registry::~Registry() {
         }
     }
     if (_components != nullptr) {
-        _memory->deallocate(_components, _compCapacity * sizeof(SparseSet*), alignof(SparseSet*));
+        _memory->deallocate(static_cast<void*>(_components), _compCapacity * sizeof(SparseSet*), alignof(SparseSet*));
     }
     if (_generations != nullptr) {
         _memory->deallocate(_generations, _entityCapacity * sizeof(uint32_t), alignof(uint32_t));
@@ -304,10 +296,10 @@ void Registry::EnsureEntityCapacity(uint32_t index) {
         _entityCapacity *= 2;
     }
 
-    _generations = static_cast<uint32_t*>(ReallocAligned(_memory, _generations, oldCap * sizeof(uint32_t),
-                                                         _entityCapacity * sizeof(uint32_t), alignof(uint32_t)));
-    _freeIndices = static_cast<uint32_t*>(ReallocAligned(_memory, _freeIndices, oldCap * sizeof(uint32_t),
-                                                         _entityCapacity * sizeof(uint32_t), alignof(uint32_t)));
+    _generations =
+        static_cast<uint32_t*>(ReallocAligned(_memory, _generations, oldCap * sizeof(uint32_t), _entityCapacity * sizeof(uint32_t), alignof(uint32_t)));
+    _freeIndices =
+        static_cast<uint32_t*>(ReallocAligned(_memory, _freeIndices, oldCap * sizeof(uint32_t), _entityCapacity * sizeof(uint32_t), alignof(uint32_t)));
 
     for (size_t i = oldCap; i < _entityCapacity; ++i) {
         _generations[i]            = 1;
@@ -321,8 +313,9 @@ void Registry::EnsureComponentCapacity(uint32_t id) {
     }
     size_t oldCap = _compCapacity;
     _compCapacity = id + 8;
-    _components   = static_cast<SparseSet**>(ReallocAligned(_memory, _components, oldCap * sizeof(SparseSet*),
-                                                            _compCapacity * sizeof(SparseSet*), alignof(SparseSet*)));
+    _components   = static_cast<SparseSet**>(
+        ReallocAligned(_memory, static_cast<void*>(_components), oldCap * sizeof(SparseSet*), _compCapacity * sizeof(SparseSet*), alignof(SparseSet*))
+    );
     for (size_t i = oldCap; i < _compCapacity; ++i) {
         _components[i] = nullptr;
     }
@@ -379,38 +372,42 @@ auto Registry::RegisterComponentDynamic(std::string_view name, size_t size, size
         const uint32_t id = ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t {
             uint32_t family = 0xFFFFFFFFu;
             bool     fresh  = false;
-            if (const auto named = s_NameToFamilyID.Find(name))
+            if (const auto named = s_NameToFamilyID.Find(name)) {
                 family = *named;
-            else if (const auto hashed = s_HashToDense.Find(HashTypeName(name)))
+            } else if (const auto hashed = s_HashToDense.Find(HashTypeName(name))) {
                 family = *hashed;
-            else {
+            } else {
                 family = s_TypeCounter++;
                 s_HashToDense.Insert(HashTypeName(name), family);
                 fresh = true;
             }
             const auto found = s_DynamicFamilyLayouts.find(family);
             if (found != s_DynamicFamilyLayouts.end()) {
-                if (found->second != std::pair {size, alignment})
+                if (found->second != std::pair {size, alignment}) {
                     return 0xFFFFFFFFu;
+                }
             } else {
                 // Both a known name and a known typed hash are protected: a
                 // spelling alias must not convert a C++ family to raw storage.
-                if (!fresh)
+                if (!fresh) {
                     return 0xFFFFFFFFu;
+                }
                 s_DynamicFamilyLayouts.emplace(family, std::pair {size, alignment});
             }
             name = *s_FamilyNames.emplace(name).first;
             s_NameToFamilyID.Insert(name, family);
             return family;
         });
-        if (id == 0xFFFFFFFFu)
+        if (id == 0xFFFFFFFFu) {
             return id;
+        }
         EnsureComponentCapacity(id);
         if (_components[id] != nullptr) {
             // Family names are process-global; storage is per registry. Never
             // reinterpret a typed family, or an existing incompatible layout.
-            if (!_typeInfo[id].isDynamic || _typeInfo[id].size != size || _typeInfo[id].alignment != alignment)
+            if (!_typeInfo[id].isDynamic || _typeInfo[id].size != size || _typeInfo[id].alignment != alignment) {
                 return 0xFFFFFFFFu;
+            }
             return id;
         }
         _components[id] = CreateSparseSet(size, alignment);
@@ -451,4 +448,4 @@ auto Registry::AddDynamic(Entity entity, uint32_t familyID) -> void* {
     });
 }
 
-}
+} // namespace ZHLN::ECS

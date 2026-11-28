@@ -8,11 +8,11 @@
 
 namespace ZHLN {
 struct alignas(64) BufferSync {
-    std::atomic<int> viewExportCount {0};
-    ZHLN::Mutex      shadowLock {};
+    std::atomic<int> viewExportCount;
+    ZHLN::Mutex      shadowLock;
 };
 
 static_assert(std::is_nothrow_default_constructible_v<BufferSync>);
 static_assert(std::is_trivially_destructible_v<BufferSync>);
 static_assert(std::is_standard_layout_v<BufferSync>);
-}
+} // namespace ZHLN
