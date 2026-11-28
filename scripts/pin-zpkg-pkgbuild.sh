@@ -2,26 +2,6 @@
 # Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# scripts/pin-zpkg-pkgbuild.sh
-#
-# Pin packaging/arch/PKGBUILD to a commit that ALREADY EXISTS.
-#
-# A commit cannot contain its own SHA-1, and `git commit --amend` produces a
-# different hash, so `_commit` (and the checksum of its tarball) can never be
-# edited in the same commit they point at. The recipe is always TWO commits:
-#
-#   A  the code change (utils/zpkg/VERSION, packaging/keys/, sync, ...) pushed
-#      to the remote, with `_commit` still holding the PREVIOUS value;
-#   B  `scripts/pin-zpkg-pkgbuild.sh <A>` and commit ONLY the PKGBUILD.
-#
-# makepkg builds with B's PKGBUILD but extracts A's tarball, which contains all
-# the code; B is metadata only. Never amend A after pinning it -- that changes
-# both the hash and the checksum. Nothing in the tree requires _commit == HEAD;
-# the only requirement is that the pinned commit contains the zpkg tree.
-#
-# Usage:
-#   scripts/pin-zpkg-pkgbuild.sh [commit-or-ref]  # default HEAD; writes pin
-#   scripts/pin-zpkg-pkgbuild.sh --check          # CI: refuse a self-pin
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -55,10 +35,10 @@ if [ "${1:-}" = "--check" ]; then
         echo "ok: PKGBUILD pins $commit (HEAD $head); pinned object absent from this shallow clone"
         exit 0
     fi
-    for required in utils/zpkg/VERSION packaging/keys/zahlen-release.pub; do
+    for required in utils/zpkg/CMakeLists.txt packaging/keys/zahlen-release.pub; do
         if ! git -C "$root" cat-file -e "${commit}:${required}" 2>/dev/null; then
             echo "error: pinned commit $commit has no $required" >&2
-            echo "       pin a commit that contains the zpkg CalVer and the pinned key" >&2
+            echo "       pin a commit that contains zpkg's CMake project and the pinned key" >&2
             exit 1
         fi
     done
@@ -76,7 +56,7 @@ if ! commit=$(git -C "$root" rev-parse --verify "${target}^{commit}" 2>/dev/null
     echo "error: cannot resolve '$target' to a commit" >&2
     exit 1
 fi
-for required in utils/zpkg/VERSION packaging/keys/zahlen-release.pub; do
+for required in utils/zpkg/CMakeLists.txt packaging/keys/zahlen-release.pub; do
     if ! git -C "$root" cat-file -e "${commit}:${required}" 2>/dev/null; then
         echo "error: $commit has no $required; commit (and push) the code first" >&2
         exit 1

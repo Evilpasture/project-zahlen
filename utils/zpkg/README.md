@@ -7,9 +7,8 @@ For command syntax, see [Commands](#commands).
 ## Version and trust
 
 `zpkg --version` is the manager's own **CalVer** (`YYYY.MM.DD`, from
-`utils/zpkg/VERSION`); it is not the engine version. The installed engine
-toolchain is shown by `zpkg list` / `zpkg info`. A PKGBUILD bump updates the
-manager only.
+`utils/zpkg/CMakeLists.txt`); it is not the engine version. The installed engine
+toolchain is shown by `zpkg list` / `zpkg info`.
 
 The project signing key is long-lived, committed at
 [`packaging/keys/zahlen-release.pub`](../../packaging/keys/zahlen-release.pub)

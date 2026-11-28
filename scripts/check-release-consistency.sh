@@ -236,27 +236,34 @@ if [ -n "$asset_list" ]; then
     fi
 fi
 
-# -- CalVer: one number, three places, checked against the release date ------
 if [ "$check_versions" -eq 1 ]; then
-    version_file="$repo/utils/zpkg/VERSION"
+    calver=""
+    zpkg_cmake="$repo/utils/zpkg/CMakeLists.txt"
     pkgbuild="$repo/packaging/arch/PKGBUILD"
-    if ! have "$version_file"; then
-        fail "missing $version_file"
+    if ! have "$zpkg_cmake"; then
+        fail "missing $zpkg_cmake"
     else
-        calver=$(tr -d '[:space:]' <"$version_file")
-        if [[ ! $calver =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}$ ]]; then
-            fail "utils/zpkg/VERSION is '$calver', expected CalVer YYYY.MM.DD"
+        project_pattern='^[[:space:]]*project\(zpkg VERSION [0-9]+\.[0-9]+\.[0-9]+ LANGUAGES CXX\)[[:space:]]*$'
+        project_count=$(grep -Ec "$project_pattern" "$zpkg_cmake" || true)
+        if [ "$project_count" -ne 1 ]; then
+            fail "expected exactly one 'project(zpkg VERSION ... LANGUAGES CXX)' in $zpkg_cmake"
+            calver=""
         else
-            pass "utils/zpkg/VERSION is CalVer $calver"
+            calver=$(sed -nE 's/^[[:space:]]*project\(zpkg VERSION ([0-9]+\.[0-9]+\.[0-9]+) LANGUAGES CXX\)[[:space:]]*$/\1/p' "$zpkg_cmake")
+        fi
+        if [[ ! $calver =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}$ ]]; then
+            fail "zpkg CMake version is '$calver', expected CalVer YYYY.MM.DD"
+        else
+            pass "zpkg CMake version is CalVer $calver"
         fi
         pkgver=$(sed -n 's/^pkgver=//p' "$pkgbuild" | head -1 | tr -d "'\"")
         if [ "$pkgver" != "$calver" ]; then
-            fail "PKGBUILD pkgver=$pkgver but utils/zpkg/VERSION=$calver (run scripts/bump-zpkg-calver.sh)"
+            fail "PKGBUILD pkgver=$pkgver but zpkg CMake version=$calver"
         else
             pass "PKGBUILD pkgver matches zpkg's CalVer"
         fi
         if [ -n "$expected_date" ] && [ "$calver" != "$expected_date" ]; then
-            fail "zpkg CalVer $calver is not the release date $expected_date (run scripts/bump-zpkg-calver.sh --date $expected_date)"
+            fail "zpkg CalVer $calver is not the release date $expected_date"
         else
             [ -n "$expected_date" ] && pass "zpkg CalVer matches the release date"
         fi

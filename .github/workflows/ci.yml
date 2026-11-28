@@ -254,9 +254,6 @@ jobs:
         run: |
           & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install simdjson zlib zstd curl openssl --triplet x64-windows
 
-      # zpkg takes its version from the engine's CMakeLists.txt, which this job
-      # checks out. -DZPKG_VERSION is the documented escape hatch for a build with
-      # no engine tree; using it here would test a path users do not take.
       - name: Configure
         run: >
           cmake -S utils/zpkg -B build-zpkg -A x64
