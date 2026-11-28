@@ -31,8 +31,8 @@ zpkg parses both files with simdjson and rejects missing required keys or
 incorrect types. `cmake/Toolchains.cmake` generates the metadata and dependency
 graph.
 
-CI produces one `usr/` archive per component from a **single** builder image and
-publishes the release toolchain (sanitized CI builds are not published):
+CI produces one `usr/` archive per component from a single builder image and
+publishes the release toolchain:
 
 ```
 zahlen-<component>-<toolchain-id>.tar.gz
@@ -41,9 +41,7 @@ SHA256SUMS
 ```
 
 `<toolchain-id>` looks like `0.x.x-xxxxxxx-gcc-16.x.x-x86_64-release` and is
-derived from the same inputs as the ABI hash. Release archives use the Release
-configuration with `USE_SANITIZERS=OFF`; sanitizer-enabled builds remain
-available for in-tree testing.
+derived from the same inputs as the ABI hash.
 
 | Component / config suffix | Installed target | Requires |
 |---|---|---|
@@ -122,16 +120,14 @@ and vendored GLFW/zstd archives are completely sealed inside
 and the linker export allowlist (`cmake/zahlen_engine.map`), audited by
 `configure/check_engine_exports.py`; no `libJolt*` library, header, compile
 definition, or third-party symbol is installed or leaked to consumers.
-`libzahlen_engine.so` does not embed or interpose a custom allocator (first-party
-in-tree host executables link `mimalloc` directly on non-Apple, non-sanitizer
-builds, while SDK consumers own their process allocator).
+`libzahlen_engine.so` does not embed or interpose an allocator; SDK consumers
+select the allocator for their process.
 
 Each config checks the compiler family, architecture, libstdc++ dual-ABI switch
 (`_GLIBCXX_USE_CXX11_ABI`), absence of `_GLIBCXX_DEBUG`, and compiles
 `cmake/probes/pr125280-static-member.cpp` under `-std=c++26 -freflection`.
-Release archives use `USE_SANITIZERS=OFF`; sanitizer-enabled in-tree builds
-still configure the package targets for testing. The ABI check does **not** pin a
-compiler patch version, git commit hash, `__GLIBCXX__` release date, or consumer
+The ABI check does **not** pin a compiler patch version, git commit hash,
+`__GLIBCXX__` release date, or consumer
 `CMAKE_BUILD_TYPE`; COM input chains verify struct layouts at runtime via
 `LayoutHash`.
 

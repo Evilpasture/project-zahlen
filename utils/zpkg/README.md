@@ -45,8 +45,8 @@ preserve the active selection. Use `zpkg use <id>` to switch. `zpkg install
 
 ## Build isolation
 
-`utils/zpkg` is a standalone C++23 CMake project. It does not link the engine or
-inherit its sanitizer and CPU flags. GCC builds link libstdc++ statically.
+`utils/zpkg` is a standalone C++23 project and does not link the engine. GCC
+builds link libstdc++ statically.
 
 ## Building
 
