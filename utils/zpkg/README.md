@@ -10,14 +10,12 @@ For command syntax, see [Commands](#commands).
 `utils/zpkg/CMakeLists.txt`); it is not the engine version. The installed engine
 toolchain is shown by `zpkg list` / `zpkg info`.
 
-The project signing key is long-lived, committed at
+The project signing key is pinned at
 [`packaging/keys/zahlen-release.pub`](../../packaging/keys/zahlen-release.pub)
-and baked into `zpkg` at build time (see `CMakeLists.txt`), so no manual
-trust step is needed — the binary carries the key it verifies with, the same
-model as `pacman` (`archlinux-keyring`) and `apt` (`ubuntu-keyring`). A
-release signed by any other key is a refusal, not an instruction to add
-another key. See [Upgrading](../../docs/UPGRADING.md). `zpkg key add` remains
-for trusting other publishers' keys.
+and embedded in `zpkg` at build time. Official release signatures are verified
+against this key. Other publishers' keys are stored per user and can be added
+with `zpkg key add`; planned key rotations use a dual-signed transition release.
+See [Upgrading](../../docs/UPGRADING.md).
 
 ## Install a release
 
@@ -211,15 +209,13 @@ download of everything that is not in the closure.
 <fingerprint-hex> <base64 ed25519 signature>
 ```
 
-The signature covers the exact bytes of the file named before the extension. The
-project key is built into `zpkg` (see `CMakeLists.txt`), so official releases
-verify with no `key add`; other publishers' keys are trusted per store with
-`zpkg key add <key.pub> --name <who>`. Multiple lines are allowed: `zpkg`
-accepts a signature from any trusted key, which is how a deliberate key
-rotation publishes one dual-signed release. The project key is pinned at
-[`packaging/keys/`](../../packaging/keys/README.md); a release signed by an
-unknown key is a refusal, not an instruction to trust it. zpkg never signs; a
-release job does:
+The signature covers the exact bytes of the file named before the extension.
+The project key is built into `zpkg` (see `CMakeLists.txt`) and pinned at
+[`packaging/keys/`](../../packaging/keys/README.md). Other publishers' keys are
+trusted per user with `zpkg key add <key.pub> --name <who>`. Multiple signer
+lines are allowed; a signature from any trusted key is accepted. A planned key
+rotation uses a dual-signed transition release. zpkg verifies signatures but
+does not sign releases; a release job does:
 
 ```sh
 openssl genpkey -algorithm ed25519 -out release-key.pem

@@ -51,32 +51,11 @@ cmake -S my-game -B build --toolchain="$(zpkg prefix)/share/zahlen/ZahlenToolcha
 cmake --build build
 ```
 
-## Keys
-
-The project signing key is long-lived and pinned at
-[`packaging/keys/zahlen-release.pub`](../packaging/keys/zahlen-release.pub).
-It is baked into `zpkg` at build time, so there is nothing to trust by hand:
-
-```sh
-zpkg key list   # shows the built-in official key
-```
-
-Official installs always require a trusted signature, so an unannounced key
-rotation would fail the upgrade. A deliberate rotation is dual-signed: the
-transition release carries one signature line for the old key and one for the
-new, so either store keeps working. If you do see
-`no trusted key with fingerprint ...`, verify the fingerprint out of band
-before trusting anything — do not just add the key from the same release page.
-
 ## Cleanup
 
 ```sh
-zpkg remove 0.5.0-gnu-x86_64-release          # old toolchain, once the game works
-zpkg key remove <old-fingerprint>              # only after you no longer need to
-                                               # verify or reinstall that release
+zpkg remove 0.5.0-gnu-x86_64-release  # old toolchain, once the game works
 ```
-
-Removing an old key means old release archives can no longer be verified.
 
 ## If you prefer the explicit form
 

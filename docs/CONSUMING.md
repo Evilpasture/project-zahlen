@@ -28,23 +28,16 @@ archive formats and HTTPS remotes. See the
 
 ## 2. Install the engine
 
-The project key is long-lived and pinned in this repository at
-[`packaging/keys/zahlen-release.pub`](../packaging/keys/zahlen-release.pub).
-The official release key is embedded in `zpkg` at build time (see
-`utils/zpkg/CMakeLists.txt`); `zpkg key list` identifies it as built-in, and
-official packages verify against it automatically:
+Official release archives are signed. `zpkg install` verifies their signatures
+and archive checksums, then installs Application and its dependencies from the
+latest release:
 
 ```sh
 zpkg install
-zpkg key list   # shows the built-in official key
 ```
 
-`install` selects Application and its dependencies from the latest official
-GitHub release. It downloads packages and requires a trusted signature and
-matching archive hashes. Key rotation releases are dual-signed so stores
-trusting either key can verify the transition. An unannounced key change fails
-signature verification. Use `zpkg key add` to trust other publishers' keys. See
-[Upgrading](UPGRADING.md) for the version lifecycle.
+Key rotation releases are dual-signed so stores trusting either key can verify
+the transition. See [Upgrading](UPGRADING.md) for the version lifecycle.
 
 To select components or pin a release:
 
