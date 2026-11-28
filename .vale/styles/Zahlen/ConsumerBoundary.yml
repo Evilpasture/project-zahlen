@@ -1,0 +1,18 @@
+extends: existence
+message: "Do not expose internal CI scripts, sanitizer switches, or test runners ('%s') in user/package docs."
+level: error
+scope: raw
+nonword: true
+ignorecase: false
+tokens:
+  - '\bUSE_SANITIZERS\b'
+  - "(?<![A-Za-z0-9_])-fsanitize=[a-z,_-]+"
+  - '\b(?:ASAN|UBSAN|TSAN|LSAN|MSAN)_OPTIONS\b'
+  - '\b(?:ENABLE|ZHLN|ZPKG)_(?:ASAN|UBSAN|TSAN|LSAN|MSAN|SANITIZERS?)\b'
+  - '\bZHLN_TEST_[A-Z0-9_]+\b'
+  - '\b(?:CI (?:job|workflow|pipeline|lane|runner|build|check)|(?:in|on) CI)\b'
+  - '(?<![A-Za-z0-9_])\.github/workflows(?:/[A-Za-z0-9_.-]+)?'
+  - '\b(?:GITHUB_ACTIONS|GITHUB_WORKFLOW|GITHUB_RUN_ID|RUNNER_OS)\b'
+  - '\bscripts/(?:test|check|verify|ci)-[A-Za-z0-9_.-]+'
+  - '\btest-toolchain-install\.sh\b'
+  - '\bcheck-release-consistency\.sh\b'

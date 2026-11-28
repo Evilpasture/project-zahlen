@@ -19,9 +19,9 @@ renderer internals. The default motor does not drive facing unless requested.
 A composition root creates a character body with `ISimulation::CreateCharacter`,
 attaches its CharacterBodyComponent/TransformComponent to an entity, and calls
 `Character::Attach(entities, entity)`. Character attachment does not replace or
-retire the body. Explicit `Character::Detach` releases the host's Movement,
-Input, HostCharacter and motor/state components, never the CharacterBodyComponent.
-Scene/entity cleanup continues to retire the body's real physics resource.
+retire the body. `Character::Detach` releases the host's Movement, Input, HostCharacter and
+motor/state components. Scene/entity cleanup retires the CharacterBodyComponent's
+physics resource.
 
 ```cpp
 // after creating player and attaching its Physics/Transform components:
@@ -34,9 +34,9 @@ app.AddLayer(Character::Layer {}).AddLayer(CameraRig::Layer {});
 assigned to it. The host preserves the existing WASD/gamepad normalization,
 RMB look, jump/sprint, trigger threshold and wheel/D-pad zoom rules. The same
 pure snapshot translator is shared by the native input adapter to prevent two
-versions of the arithmetic from drifting. Physical reads do not decide UI/game
-capture policy: disable ControllerComponent or supply a frozen explicit
-snapshot when the application owns that decision.
+versions of the arithmetic from drifting. The host owns UI/game capture policy.
+Disable ControllerComponent or supply a frozen explicit snapshot when the
+application owns that decision.
 
 `Character::Apply` accepts explicit intent for replay, AI and deterministic
 input tests. `dt <= 0` or non-finite time changes nothing. A jump pulse survives
@@ -67,8 +67,8 @@ the helpers author published POD controls:
 - `Read` copies playback progress without exposing/copying a runtime handle.
 - `Detach` removes controls/IK, not the Animator or cached prefab resources.
 
-Clip/gait selection stays in the host. These helpers do not acquire an
-Context or export native animation containers across COM.
+Clip/gait selection stays in the host. Animator controls use published POD
+state; native animation containers stay in their owning runtime.
 
 ## Composition constraints
 

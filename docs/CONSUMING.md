@@ -4,10 +4,9 @@ Audience: game developers using released Linux x86_64 packages. This page is the
 canonical consumer setup guide for this revision; use the version at your release
 tag when consuming an older release.
 
-Install Zahlen with `zpkg` into a directory you own. You do not clone or build the
-engine, embed this repository, or run its governance checks. The engine is a
-prebuilt shared library; optional packages such as Application ship sources that
-CMake compiles as part of your game.
+Install the released Linux x86_64 toolchain with `zpkg`. The Engine package
+provides a prebuilt shared library; source packages such as Application are
+compiled by CMake as part of your game.
 
 ## Prerequisites
 
@@ -22,31 +21,23 @@ to use, make it executable, and put it on `PATH`. The release supplies
 `SHA256SUMS.tools` for the manager binary; verify it before execution.
 Checksums detect corruption, but are not an independent source of publisher trust.
 
-Building the manager is an optional maintainer/bootstrap path, not a prerequisite
-for using the engine. It needs a C++23 compiler, simdjson and zlib, and OpenSSL
-for signature verification. zstd and libcurl enable additional formats and
-HTTPS remotes. See the [zpkg build reference](../utils/zpkg/README.md#building)
-if you choose that path.
+To build `zpkg` from source, use a C++23 compiler with simdjson and zlib;
+OpenSSL enables signature verification, while zstd and libcurl enable additional
+archive formats and HTTPS remotes. See the
+[zpkg build reference](../utils/zpkg/README.md#building).
 
 ## 2. Install the engine
 
-The project key is long-lived and pinned in this repository at
-[`packaging/keys/zahlen-release.pub`](../packaging/keys/zahlen-release.pub)
-(Arch users: `/usr/share/zahlen/zahlen-release-key.pub`). Verify its fingerprint
-out of band, then trust it **once**:
+Official release archives are signed. `zpkg install` verifies their signatures
+and archive checksums, then installs Application and its dependencies from the
+latest release:
 
 ```sh
-zpkg key add packaging/keys/zahlen-release.pub --name "zahlen release"
 zpkg install
 ```
 
-`install` selects Application and its dependencies from the latest official
-GitHub release. It downloads packages and requires a trusted signature and
-matching archive hashes. The key is committed to git history, so it is not
-self-authenticating: do not trust a `zahlen-release-key.pub` that came only from
-the release page it signs. Deliberate rotations are dual-signed, so an existing
-store keeps working; an unannounced rotation is a refusal, not an instruction to
-add another key. See [Upgrading](UPGRADING.md) for the version lifecycle.
+Key rotation releases are dual-signed so stores trusting either key can verify
+the transition. See [Upgrading](UPGRADING.md) for the version lifecycle.
 
 To select components or pin a release:
 
@@ -60,8 +51,8 @@ toolchain; `zpkg sync --activate` installs the same package set from a newer
 release and switches it, or `zpkg use <id>` switches explicitly. Repeated installs
 keep packages already present. `zpkg list` shows installed toolchains and
 `zpkg prefix` prints the active prefix. For reproducible builds, use
-`zpkg prefix <id>`. `zpkg --version` is the manager's CalVer, **not** the engine
-version; `zpkg list` / `zpkg info` show the installed toolchain.
+`zpkg prefix <id>`. `zpkg --version` reports the manager's CalVer;
+`zpkg list` and `zpkg info` report the installed engine toolchain version.
 
 For offline archives and custom remotes, see the
 [zpkg reference](../utils/zpkg/README.md#commands).
@@ -88,21 +79,23 @@ int main(int argc, char* argv[]) {
 }
 ```
 
-This minimal host is not a complete game or asset pipeline. After building and
-running it below, follow [From an empty host to a first scene](FIRST_GAME.md)
-to add a layer, scene, physics and input. Compose optional layers explicitly;
-Application does not auto-install every optional module that happened to be
-present in the engine builder.
+This creates a minimal host executable. The
+[From an empty host to a first scene](FIRST_GAME.md) guide adds a layer, scene,
+physics and input. Optional modules are separate packages: install each module
+with `zpkg` and link its corresponding `Zahlen::<Name>` target.
 
 ```sh
-cmake -S my-game -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_CXX_COMPILER=g++-16 \
-    -DCMAKE_PREFIX_PATH="$(zpkg prefix)"
+cmake -S my-game -B build --toolchain="$(zpkg prefix)/share/zahlen/ZahlenToolchain.cmake"
 cmake --build build
 ```
 
-Use your compiler's actual executable path if it is not called `g++-16`.
-Imported targets propagate C++26, reflection, `-fno-exceptions`, and `-fno-rtti`.
+The installed toolchain file uses the system `g++` when it meets the GCC 16.1.1
+floor, and falls back to `g++-16` when the default is older. Set
+`CMAKE_CXX_COMPILER` or `CXX` to select another compiler; the package config
+checks its ABI and reflection support. The toolchain file sets C++26 and
+reflection, adds the active prefix to package discovery, and configures runtime
+paths to the installed engine library. Imported targets propagate
+`-fno-exceptions` and `-fno-rtti` where required.
 `Zahlen::Engine` refers to the prebuilt `libzahlen_engine.so`;
 `Zahlen::Application` builds the application support sources shipped in the store.
 Additional APIs require their own `find_package(Zahlen<Name> CONFIG REQUIRED)`
@@ -117,38 +110,15 @@ and `Zahlen::<Name>` link dependency.
 ./build/my-game --headless --frames 10 --capture frame.png
 ```
 
-Application provides `--frames`, `--capture`, `--headless`, and `--fps-limit`
-(not `--max-fps`). For the full current contract use `--help` on your game.
+Application supports `--frames`, `--capture`, `--headless`, and `--fps-limit`.
+Run `./build/my-game --help` for the complete command-line options.
 
-Installed store libraries carry runtime search paths, and CMake normally gives
-build-tree executables an RPATH to their imported libraries. Do not set a global
-`LD_LIBRARY_PATH` as the default setup. If a custom launch or deployment layout
-cannot locate `libzahlen_engine.so`, configure its runtime search path or use a
-scoped `LD_LIBRARY_PATH="$(zpkg prefix)/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"`
-for diagnosis. Shipping a game outside the store needs a deliberate deployment
-layout for libraries, plugins and assets; this build-tree example is not an installer.
-
-### Without a display
-
-The window backend is Wayland-only. For software Vulkan, point the loader at
-your installed lavapipe ICD (the filename varies by distribution):
-
-```sh
-export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
-export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
-./build/my-game --headless
-```
-
-See [Vulkan driver and hardware](REQUIREMENTS.md#vulkan-driver-and-hardware)
-for the device capability check.
-
-## Do not use the engine-development workflow for a game
-
-* Do not add this repository as a Git submodule or call
-  `add_subdirectory(extern/zahlen)`. Use installed CMake packages.
-* Do not run engine governance/build scripts to build your game.
-* Do not treat `zpkg` as a game build tool. It manages packages; CMake builds
-  your game. See the [command reference](../utils/zpkg/README.md#commands).
+Installed store libraries carry runtime search paths, and CMake gives
+build-tree executables an RPATH to the imported engine library. For a deployed
+game, include the engine library, plugins and assets in the deployment layout
+and configure the executable's install RPATH for that location. A scoped
+`LD_LIBRARY_PATH="$(zpkg prefix)/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"`
+can help diagnose library lookup issues.
 
 ## License
 

@@ -1,9 +1,9 @@
 # Maintainer: Evilpasture <housemaster@evilpasture.org>
 
-pkgname=zahlen-zpkg
-_commit=8e717a43d99d36dd6aef3909bda4024aba032e56
+pkgname=zpkg
+_commit=e3de01b9f4c3b5cef6b00ca7ae5bf812936b987c
 
-pkgver=2026.11.25
+pkgver=2026.11.28
 pkgrel=1
 pkgdesc='Per-user package manager for Zahlen engine packages'
 arch=('x86_64' 'aarch64')
@@ -14,7 +14,7 @@ depends=('gcc-libs' 'zlib' 'zstd' 'openssl' 'curl' 'simdjson')
 makedepends=('cmake' 'ninja' 'gcc')
 
 source=("${pkgname}-${_commit}.tar.gz::https://github.com/Evilpasture/project-zahlen/archive/${_commit}.tar.gz")
-sha256sums=('8201129852809cabaf3776de7e74e6b1ecf112c155bff8dc83c09717acbe45c9')
+sha256sums=('ace030237f09b32e63cf139de274aaec4ece346fac23e203d9ff41c361f99d97')
 
 build() {
     cmake -S "project-zahlen-${_commit}/utils/zpkg" -B build \

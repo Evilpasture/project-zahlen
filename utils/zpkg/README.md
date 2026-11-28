@@ -6,21 +6,20 @@ For command syntax, see [Commands](#commands).
 
 ## Version and trust
 
-`zpkg --version` is the manager's own **CalVer** (`YYYY.MM.DD`, from
-`utils/zpkg/CMakeLists.txt`); it is not the engine version. The installed engine
-toolchain is shown by `zpkg list` / `zpkg info`.
+`zpkg --version` reports the manager's own CalVer (`YYYY.MM.DD`). The installed
+engine toolchain is shown by `zpkg list` / `zpkg info`.
 
-The project signing key is long-lived, committed at
+The project signing key is pinned at
 [`packaging/keys/zahlen-release.pub`](../../packaging/keys/zahlen-release.pub)
-and installed by the Arch package to `/usr/share/zahlen/zahlen-release-key.pub`.
-Trust it once with `zpkg key add`; verify its fingerprint out of band. A release
-signed by any other key is a refusal, not an instruction to add another key.
+and embedded in `zpkg` at build time. Official release signatures are verified
+against this key. Other publishers' keys are stored per user and can be added
+with `zpkg key add`; planned key rotations use a dual-signed transition release.
 See [Upgrading](../../docs/UPGRADING.md).
 
 ## Install a release
 
-After trusting the publisher key, run `zpkg install` to get Application and its
-dependencies. Component names can be shortened:
+Run `zpkg install` to get Application and its dependencies. Component names
+can be shortened:
 
 ```sh
 zpkg install application
@@ -31,7 +30,8 @@ zpkg install application --from studio
 The built-in `official` source uses GitHub Releases, with `latest` as the default
 release. `--version` selects an exact release tag. Official installs and
 `--from` component installs require a trusted signature over the index and
-verify archive hashes. Keys are never downloaded or trusted automatically.
+verify archive hashes. The official key is built into `zpkg`; other publishers'
+keys are trusted per store with `zpkg key add`.
 
 Existing local paths take precedence over component names. A bare configured
 remote installs its whole toolchain; `remote:component` retains the explicit
@@ -45,8 +45,8 @@ preserve the active selection. Use `zpkg use <id>` to switch. `zpkg install
 
 ## Build isolation
 
-`utils/zpkg` is a standalone C++23 CMake project. It does not link the engine or
-inherit its sanitizer and CPU flags. GCC builds link libstdc++ statically.
+`utils/zpkg` is a standalone C++23 project and does not link the engine. GCC
+builds link libstdc++ statically.
 
 ## Building
 
@@ -88,8 +88,8 @@ interfaces are the CLI and store format.
 
 Build with a C++23 compiler and the dependencies listed above.
 
-The default store is `%LOCALAPPDATA%\zahlen`; `ZHLN_ROOT` overrides it. Four
-things behave differently, all of them because Windows has no POSIX file model:
+The default store is `%LOCALAPPDATA%\zahlen`; `ZHLN_ROOT` overrides it. Windows
+store behavior differs in these areas:
 
 * `shims` is refused. There is no `~/.local/bin` and no symlink to follow;
   `zpkg env --shell powershell` (or `cmd`) emits the export that puts the active
@@ -118,9 +118,8 @@ $ZHLN_ROOT/cache/<sha256>                                     # downloaded archi
 ```
 
 `$ZHLN_ROOT` defaults to `${XDG_DATA_HOME:-~/.local/share}/zahlen` on POSIX and
-`%LOCALAPPDATA%\zahlen` on Windows. `ACTIVE` is a text file, not a symlink,
-because Windows only creates symlinks in developer mode; on POSIX zpkg also
-maintains the relative `active` link for humans and tools that expect a path.
+`%LOCALAPPDATA%\zahlen` on Windows. `ACTIVE` stores the active toolchain id as
+text. POSIX stores also contain a relative `active` symlink.
 
 Store behavior:
 
@@ -166,10 +165,9 @@ Install options: `--from <remote>`, `--version <tag>`, `--only a,b`, `--toolchai
 `-s/--require-signatures`, `--ignore-missing`, `--force`, `--quiet`.
 Sync options: `--from`, `--version`, `--activate`, `--dry-run`, `--force`, `--quiet`.
 
-`sync` never updates a toolchain in place. It reads the package names recorded
-in the active toolchain, resolves their closure against the target release's
-signed `index.json`, and installs into that release's own immutable toolchain
-directory. Without `--activate` it leaves `ACTIVE` alone and prints the
+`sync` installs the selected package set into a new immutable toolchain
+directory. It reads package names from the active toolchain and resolves their
+dependency closure against the target release's signed `index.json`. Without `--activate` it leaves `ACTIVE` alone and prints the
 `zpkg use <id>` command; with `--activate` it switches and warns that binaries
 already linked keep the toolchain they were built against.
 
@@ -187,8 +185,7 @@ $ zpkg install upstream:zahlen-gltf
 ```
 
 `--only a,b` is the same request written the other way, and takes the same
-closure. Naming a package and passing `--only` together is refused rather than
-merged, because the two spellings would then disagree about what was asked for.
+closure. zpkg rejects a package name combined with `--only`.
 
 The graph comes from the remote index when it carries one (`index.json` format 2,
 which `zpkg index` writes). A format-1 index names no dependencies, so zpkg
@@ -208,15 +205,13 @@ download of everything that is not in the closure.
 <fingerprint-hex> <base64 ed25519 signature>
 ```
 
-The signature covers the exact bytes of the file named before the extension. A
-key is trusted per store with `zpkg key add <key.pub> --name <who>`, so the same
-signature is accepted on a machine where the publisher is trusted and refused
-everywhere else. Multiple lines are allowed: `zpkg` accepts a signature from any
-trusted key, which is how a deliberate key rotation publishes one dual-signed
-release instead of forcing every user to re-add a key. The project key is pinned
-at [`packaging/keys/`](../../packaging/keys/README.md); a release signed by an
-unknown key is a refusal, not an instruction to trust it. zpkg never signs; a
-release job does:
+The signature covers the exact bytes of the file named before the extension.
+The project key is built into `zpkg` and pinned at
+[`packaging/keys/`](../../packaging/keys/README.md). Other publishers' keys are
+trusted per user with `zpkg key add <key.pub> --name <who>`. Multiple signer
+lines are allowed; a signature from any trusted key is accepted. A planned key
+rotation uses a dual-signed transition release. zpkg verifies signatures but
+does not sign releases; a release job does:
 
 ```sh
 openssl genpkey -algorithm ed25519 -out release-key.pem
@@ -224,9 +219,6 @@ openssl pkey -in release-key.pem -pubout -outform DER | tail -c 32 | base64 > ke
 openssl pkeyutl -sign -inkey release-key.pem -rawin -in SHA256SUMS -out sig.bin
 printf '%s ' "$(fingerprint)" && base64 sig.bin
 ```
-
-`scripts/test-toolchain-install.sh` does exactly this in CI, then installs with
-`--require-signatures` and checks that a tampered `SHA256SUMS` is rejected.
 
 For publishing, see [package metadata](../../packaging/README.md#publishing-metadata).
 

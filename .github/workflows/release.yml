@@ -408,10 +408,8 @@ jobs:
     env:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
     steps:
-      # This job deliberately downloads nothing but the release: the whole point
-      # is that the published artifacts are sufficient. The repository is here
-      # only for the environment script, which is the same one the build job ran
-      # -- that is what makes "the runtime deps" identical on both sides.
+      # This job downloads the published release artifacts and uses the
+      # repository only for the shared environment setup script.
       - name: Checkout repository (for the environment script only)
         uses: actions/checkout@v4
         with:
@@ -426,20 +424,17 @@ jobs:
           gh release download "${RELEASE_TAG}" -D dist
           ls -la dist
 
-      # The compiler is not guessed from the workflow inputs: the toolchain
-      # descriptor in the release says which GCC built it, and the package
-      # config refuses any other compiler version.
+      # The installed toolchain file selects the matching GCC automatically;
+      # this major version is used here to provision that compiler on the runner.
       - name: Read the toolchain descriptor
         id: tc
         run: |
           id=$(sed -n 's/.*"id":"\([^"]*\)".*/\1/p' dist/toolchain.json)
           gcc=$(sed -n 's/.*"compiler_version":"\([0-9][0-9]*\).*/\1/p' dist/toolchain.json)
-          profile=$(sed -n 's/.*"profile":"\([^"]*\)".*/\1/p' dist/toolchain.json)
           test -n "${id}" && test -n "${gcc}"
           echo "id=${id}" >> "$GITHUB_OUTPUT"
           echo "gcc=${gcc}" >> "$GITHUB_OUTPUT"
-          echo "profile=${profile}" >> "$GITHUB_OUTPUT"
-          echo "toolchain ${id} (gcc ${gcc}, ${profile})"
+          echo "toolchain ${id} (GCC ${gcc})"
 
       - name: Provision a normal dev environment
         run: scripts/ci-ubuntu-2204-env.sh --consumer --gcc "${{ steps.tc.outputs.gcc }}" --glibc-baseline "${GLIBC_BASELINE}"
@@ -458,10 +453,7 @@ jobs:
           # The manager binary ships separately from the packages, so it has its
           # own sums file (the packages' SHA256SUMS is zpkg's own contract).
           ( cd dist && sha256sum -c SHA256SUMS.tools )
-          # Trust the key pinned in git history, NOT the one from this release
-          # page. If the two differ, the install below refuses: that is the
-          # whole point of an out-of-band trust anchor.
-          zpkg key add packaging/keys/zahlen-release.pub --name "zahlen release"
+          # Show the signing keys configured in this fresh store.
           zpkg key list
           # No ZHLN_ROOT: the default per-user store is what a developer gets.
           zpkg install dist --require-checksums --require-signatures
@@ -490,11 +482,7 @@ jobs:
           }
           EOF
           cmake -S consumer -B consumer-build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER="gcc-${{ steps.tc.outputs.gcc }}" \
-            -DCMAKE_CXX_COMPILER="g++-${{ steps.tc.outputs.gcc }}" \
-            -DCMAKE_PREFIX_PATH="${prefix}" \
-            -DZahlen_SANITIZER_PROFILE="${{ steps.tc.outputs.profile }}"
+            --toolchain="${prefix}/share/zahlen/ZahlenToolchain.cmake"
           cmake --build consumer-build --verbose
           # Nothing may reach back into a checkout: the store is the only source.
           if grep -Fq "${GITHUB_WORKSPACE}/src" consumer-build/build.ninja; then
@@ -539,8 +527,7 @@ jobs:
           zpkg install prev-dist --require-checksums --require-signatures
           zpkg list
 
-          # The one-time trust step for the long-lived project key. After this,
-          # no `key add` may appear: sync must install the new release as-is.
+          # Add the current project key before syncing to this release.
           zpkg key add packaging/keys/zahlen-release.pub --name "zahlen release"
           zpkg sync --version "${RELEASE_TAG}" --activate
           zpkg list

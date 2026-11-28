@@ -5,6 +5,7 @@
 // manager reads untrusted input at the exact point where the output is a
 // directory of files it is about to trust.
 #include "zpkg/zpkg.hpp"
+#include "zpkg/BuiltinKeys.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -875,7 +876,13 @@ void TestChecksumAndSignaturePolicy() {
     const fs::path keyFile = directory / "publisher.pub";
     Require(ZHLN::WriteFile(keyFile, ZHLN::Base64Encode(key.publicKey.data(), key.publicKey.size()) + "\n"));
     Require(store.KeyAdd(keyFile, "tester"));
-    Expect(Take(store.Keys()).size() == 1);
+    const std::string fingerprint = ZHLN::KeyFingerprint(key.publicKey);
+    bool               listed      = false;
+    for (const auto& [known, name]: Take(store.Keys())) {
+        if (known == fingerprint && name == "tester")
+            listed = true;
+    }
+    Expect(listed);
 
     SignSums(output, key);
     ZHLN::InstallOptions signedOptions;
@@ -1150,11 +1157,36 @@ void TestOfficialRelease() {
     const fs::path directory = MakeTemp("official");
     ZHLN::Store store(TestEnv(directory));
     ExpectError(store.RemoteAdd("official", "file:///tmp/untrusted"));
-    // Empty trust store fails before attempting a network request.
-    auto refused = ZHLN::InstallFromRemote(store, "official", {});
-    ExpectError(refused);
-    if (!refused)
-        Expect(refused.error().message.find("zpkg key add") != std::string::npos);
+    if (ZHLN::BuiltinOfficialKey.empty()) {
+        // Built without the default key: an empty trust store still fails
+        // before attempting a network request.
+        auto refused = ZHLN::InstallFromRemote(store, "official", {});
+        ExpectError(refused);
+        if (!refused)
+            Expect(refused.error().message.find("zpkg key add") != std::string::npos);
+    } else {
+        // The official key is baked into the binary: a fresh store already
+        // trusts it, with no `key add` and no network request.
+        auto builtin = Take(ZHLN::ParsePublicKey(ZHLN::BuiltinOfficialKey));
+        const std::string fingerprint = ZHLN::KeyFingerprint(builtin);
+        const auto        keys        = Take(store.Keys());
+        Expect(!keys.empty());
+        bool listed = false;
+        for (const auto& [known, name]: keys) {
+            if (known == fingerprint && name == "official (built-in)")
+                listed = true;
+        }
+        Expect(listed);
+        auto trusted = Take(store.TrustedKey(fingerprint));
+        Expect(trusted.has_value());
+        if (trusted)
+            Expect(ZHLN::KeyFingerprint(*trusted) == fingerprint);
+        // A short fingerprint names the same key, as a signature line may.
+        auto shortTrusted = Take(store.TrustedKey(fingerprint.substr(0, 8)));
+        Expect(shortTrusted.has_value());
+        auto unknown = Take(store.TrustedKey("00000000000000000000000000000000"));
+        Expect(!unknown.has_value());
+    }
     ZHLN::InstallOptions invalidVersion;
     invalidVersion.release = "../other";
     ExpectError(ZHLN::InstallFromRemote(store, "official", invalidVersion));

@@ -7,8 +7,6 @@ It adds game logic as an application layer.
 
 Copy [`samples/FirstGameSample.cpp`](../samples/FirstGameSample.cpp) from the
 release tag matching your installed engine to your game directory as `main.cpp`.
-It is documentation only and is deliberately not a CMake target in this tree;
-examples must never be inputs to CI jobs.
 The sample positions the camera, creates a floor and a falling box, and closes
 on Escape.
 
@@ -41,9 +39,8 @@ for supported signatures and error returns.
 The separate capability headers are needed where their methods are called:
 `IEntities` manages entities and components, `IAssetLibrary` spawns assets,
 `IGraphicsDevice` controls graphics settings, and `IActionContext` reads input.
-`IEngine` exposes these capabilities; they are not standalone globals. Do not
-keep a borrowed engine/capability pointer beyond the app's lifetime. If a layer
-owns resources needing explicit release, release them in `Stop`.
+`IEngine` provides the capability accessors. Borrowed engine/capability pointers
+remain valid for the app lifetime. Layers release owned resources in `Stop`.
 
 ## 3. Make it yours
 
@@ -51,8 +48,8 @@ owns resources needing explicit release, release them in `Stop`.
   position, color and physics. With `createPhysics = true`, a static floor and
   dynamic box interact through the simulation. The convenience spawn methods
   return `Entity::Null()` on failure; the lower-level `SpawnPrimitive` returns
-  a result with an error. Do not directly animate a dynamic physics body's
-  transform each frame; use the simulation capability for physics-driven motion.
+  a result with an error. Use the simulation capability for physics-driven
+  motion of dynamic bodies.
 * **Keep game state:** add fields to `Game`, such as elapsed time or an entity
   handle, set them in `Start`, and use them in `Tick`. Before using a retained
   handle, check `engine.Entities()->IsAlive(handle)`. Use `Get<T>`, `Patch<T>`,

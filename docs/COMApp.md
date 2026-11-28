@@ -33,7 +33,7 @@ facades a translation unit calls.
 and provide:
 
 - `--help` / `-h`, `--version`, `--print-graph [none|fxaa|smaa]`, `--debug-attach`
-- `--frames <N>` — stop cleanly after `N` completed frames (`0`: unlimited)
+- `--frames <N>` — stop after `N` completed frames (`0`: unlimited)
 - `--capture <path.png>` — read back the primary window and write a PNG after
   `--frames` completed frames (default `1` when `--frames` is omitted), then exit
 - `--plugin <name|path>` — dynamically load a `COM::IAppLayer` shared library
@@ -79,8 +79,7 @@ toolchain.
   if unavailable.
 - `app.LoadPlugin("freecam", nullptr, /*required=*/false)` loads the plugin
   when found (`ZHLN_PLUGIN_PATH`, next to the executable, `../lib`, or
-  `<engine-lib>/zahlen/plugins`) and skips it cleanly if the library file is
-  absent.
+  `<engine-lib>/zahlen/plugins`) and skips it if the library file is absent.
 - Runtime COM plugins built with `zahlen_add_plugin`:
   - **Lifecycle layers (Tier 1, installed with toolchain packages):**
     `zahlen_plugin_freecam` (`FreeCam::Component`),

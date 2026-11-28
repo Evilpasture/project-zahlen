@@ -21,6 +21,9 @@ work without a database:
 
 * `share/zahlen/toolchain.json` — the toolchain id, version, commit, compiler,
   processor, profile and ABI hash.
+* `share/zahlen/ZahlenToolchain.cmake` — a ready-to-use consumer toolchain file;
+  pass it with `cmake --toolchain` to select the matching compiler, C++26,
+  reflection, package prefix and runtime paths.
 * `share/zahlen/manifests/zahlen-<package>.json` — the package name, its
   component, the packages it requires and the targets it provides.
 
@@ -28,8 +31,8 @@ zpkg parses both files with simdjson and rejects missing required keys or
 incorrect types. `cmake/Toolchains.cmake` generates the metadata and dependency
 graph.
 
-CI produces one `usr/` archive per component from a **single** builder image and
-publishes the release toolchain (sanitized CI builds are not published):
+CI produces one `usr/` archive per component from a single builder image and
+publishes the release toolchain:
 
 ```
 zahlen-<component>-<toolchain-id>.tar.gz
@@ -38,8 +41,7 @@ SHA256SUMS
 ```
 
 `<toolchain-id>` looks like `0.x.x-xxxxxxx-gcc-16.x.x-x86_64-release` and is
-derived from the same inputs as the ABI hash. Use separate toolchain ids for
-sanitized builds.
+derived from the same inputs as the ABI hash.
 
 | Component / config suffix | Installed target | Requires |
 |---|---|---|
@@ -118,25 +120,16 @@ and vendored GLFW/zstd archives are completely sealed inside
 and the linker export allowlist (`cmake/zahlen_engine.map`), audited by
 `configure/check_engine_exports.py`; no `libJolt*` library, header, compile
 definition, or third-party symbol is installed or leaked to consumers.
-`libzahlen_engine.so` does not embed or interpose a custom allocator (first-party
-in-tree host executables link `mimalloc` directly on non-Apple, non-sanitizer
-builds, while SDK consumers own their process allocator).
+`libzahlen_engine.so` does not embed or interpose an allocator; SDK consumers
+select the allocator for their process.
 
 Each config checks the compiler family, architecture, libstdc++ dual-ABI switch
-(`_GLIBCXX_USE_CXX11_ABI`), absence of `_GLIBCXX_DEBUG`, an explicit sanitizer
-profile, and compiles `cmake/probes/pr125280-static-member.cpp` under
-`-std=c++26 -freflection`. It does **not** pin a compiler patch version, git
-commit hash, `__GLIBCXX__` release date, or consumer `CMAKE_BUILD_TYPE`; COM
-input chains verify struct layouts at runtime via `LayoutHash`.
-
-Sanitized consumers pass `-DZahlen_SANITIZER_PROFILE=asan-ubsan`; ASan/UBSan
-compile and link requirements propagate and there is no automatic switch from a
-release toolchain to an instrumented one. The asan-ubsan toolchain also installs
-a compiled hook object (`lib/zahlen/zahlen_sanitizer_options.o`) that
-`ZahlenEngineConfig.cmake` attaches to consumer executables. Its rules are
-compiled in, so no suppressions file has to be found at run time, and the
-configure step fails loudly if the object is missing rather than silently
-running without hooks.
+(`_GLIBCXX_USE_CXX11_ABI`), absence of `_GLIBCXX_DEBUG`, and compiles
+`cmake/probes/pr125280-static-member.cpp` under `-std=c++26 -freflection`.
+The ABI check does **not** pin a compiler patch version, git commit hash,
+`__GLIBCXX__` release date, or consumer
+`CMAKE_BUILD_TYPE`; COM input chains verify struct layouts at runtime via
+`LayoutHash`.
 
 ## Runtime data
 

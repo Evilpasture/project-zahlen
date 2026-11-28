@@ -76,5 +76,5 @@ See [COMPrefabGPURecovery.md](COMPrefabGPURecovery.md) for generation/revision
 validation, texture ownership, controlled resets and failure limitations.
 RGBA8 glTF capability textures use independent anonymous uploads.
 
-Do not mix native recovery entry points with a COM owning lease for the same
-prefab path.
+> [!WARNING]
+> Do not mix native recovery entry points with a COM owning lease for the same prefab path; both can mutate its ownership state.

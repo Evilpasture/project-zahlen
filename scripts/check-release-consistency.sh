@@ -16,7 +16,7 @@
 #   scripts/check-release-consistency.sh \
 #       --assets dist/packages --tools dist/tools \
 #       --notes dist/release-notes.md --asset-list dist/asset-names.txt \
-#       --versions --date 2026.11.25 --zpkg dist/tools/zpkg-linux-x86_64
+#       --versions --zpkg dist/tools/zpkg-linux-x86_64
 #
 # --assets and --tools may be the same flat directory (what `gh release
 # download` produces). Every check runs and all failures are reported together.
@@ -286,7 +286,15 @@ if [ "$check_versions" -eq 1 ]; then
                 pass "shipped zpkg reports $report"
             fi
             # Exercise the real verification path with only the pinned key.
+            # The key is baked into zpkg, so a fresh store verifies with no
+            # `key add`; an explicit `key add` of the same key still works.
             store=$(mktemp -d)
+            if ZHLN_ROOT="$store" "$zpkg_bin" verify "$assets" \
+                    --require-checksums --require-signatures >/dev/null 2>&1; then
+                pass "built-in pinned key verifies every published archive through zpkg itself"
+            else
+                fail "zpkg verify refused $assets with only the built-in pinned key trusted"
+            fi
             if ZHLN_ROOT="$store" "$zpkg_bin" key add \
                     "$repo/packaging/keys/zahlen-release.pub" --name "release check" >/dev/null 2>&1 &&
                ZHLN_ROOT="$store" "$zpkg_bin" verify "$assets" \

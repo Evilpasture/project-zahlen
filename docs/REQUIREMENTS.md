@@ -1,6 +1,6 @@
 # Requirements
 
-Applies to the native Linux x86_64 packages in release v0.3.2. Use the
+Applies to the native Linux x86_64 packages in release v0.7.0. Use the
 requirements at the tag of the installed release.
 
 ## Build tools

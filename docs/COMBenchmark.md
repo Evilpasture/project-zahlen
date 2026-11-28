@@ -15,11 +15,11 @@ The factory accepts the reflected PhysicsConfig chain (or defaults), rejects
 unsupported/malformed chains and zero capacities. LogicWorldInfo is a reflected
 output chain carrying effective capacities and active body count. Advance
 rejects non-finite/non-positive dt, flushes deferred hierarchy deletion and steps
-physics once. It deliberately does not run a game loop or synchronize transforms.
+physics once. It does not run a game loop or synchronize transforms.
 Direct ISimulation::Step retains the existing simulation contract.
 
-The logic component publication is deliberately restricted to Transform,
-WorldTransform, Hierarchy, Name, PBR, Physics and PendingDestroy. Physics replacement,
+The logic component publication is restricted to Transform, WorldTransform,
+Hierarchy, Name, PBR, Physics and PendingDestroy. Physics replacement,
 detach, deferred hierarchical despawn and Clear release bodies before storage.
 Clear removes entity-owned bodies/components; unattached simulation bodies
 remain explicitly caller-managed until DestroyBody or world teardown. Canonical
@@ -39,14 +39,14 @@ LogicBenchmark now owns a COM Ref, not World or Registry. The same falling cube
 lattice, floor slab, growing batches, body ceiling, fixed physics ticks, scalar
 per-body position readback and writes into engine-owned Transform storage remain.
 The entity iteration is spawn-order host IDs, not a borrowed dense storage map.
-The measurement includes scalar COM overhead; do not present it as a like-for-like
-measurement of the old native query cost. No bulk mapping was added without a
-profiling case. History stays oldest-first and bounded to 256 ticks; min/max,
+The measurement includes scalar COM overhead. Report that cost when comparing it
+with native query measurements. No bulk mapping was added without a profiling
+case. History stays oldest-first and bounded to 256 ticks; min/max,
 online average and monotonic tick timer retain their semantics. Reset drops
 ownership and counters; a separately retained capability may keep its world alive.
 
-Sizing never lowers caller capacities. Initial sizing additionally budgets the
-floor (fixing the old one-cube shortfall when the raised capacity was exact).
+Sizing preserves caller capacities or raises them. Initial sizing also budgets
+the floor when the requested capacity equals the body count.
 The no-display `zahlen-benchmark` CLI still measures real physics without renderer
 initialization. ZHLN_BENCH_ENTITIES and ZHLN_BENCH_TICKS are unchanged.
 
@@ -57,7 +57,7 @@ GUI::Frame. The host owns context, atlas lifetime, input, BeginFrame, End and
 SubmitUI. No Run/UI callback inversion or hidden UI compositor is installed.
 SetFontAtlas borrows a host-owned atlas until replaced/destruction, or null uses
 conservative text metrics. Tick is idempotent per host frame; hidden benchmark
-panels do not advance physics, while explicitly requested telemetry still samples.
+panels leave physics unchanged, while explicitly requested telemetry still samples.
 Attaching resets the host-frame identity/device hint and creates a fresh real
 logic benchmark. Pause, fixed-step budget, spawn/reset UI, hardware telemetry,
 stage histories and CSV capture remain. The first telemetry Tick seeds its clock,

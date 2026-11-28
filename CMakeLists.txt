@@ -35,7 +35,7 @@ if(APPLE)
 endif()
 
 
-project(zahlen VERSION 0.6.0 LANGUAGES C CXX ASM)
+project(zahlen VERSION 0.7.0 LANGUAGES C CXX ASM)
 
 option(ZHLN_INSTALL_TOOLCHAIN_PACKAGES "Install independently consumable toolchain packages" OFF)
 

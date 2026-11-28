@@ -23,8 +23,8 @@ resetting phase. Ownership replacement precedes asset publication.
 
 Unlike the native adapter, this host does **not** overwrite global ambient
 exposure. Owned flash/impact light entities provide flashes without one host
-restoring settings over another host's effect. Ground/cloud positions are used
-as supplied, rather than silently discarding cloud X/Z.
+restoring settings over another host's effect. The host uses ground and cloud
+positions as supplied, including cloud X/Z.
 
 ## Explosion
 
@@ -33,7 +33,10 @@ as supplied, rather than silently discarding cloud X/Z.
 The host preserves the real particle distributions, drag/gravity, fire/smoke
 billboard batches, four air fronts and ground ring, fading flash light,
 48-particle mesh-debris emitter, procedural DSP audio, and autonomous crater
-projection/fade. Explosions do not apply blast impulses.
+projection/fade.
+
+> [!WARNING]
+> Explosion effects omit blast impulses; physics bodies receive no impulse.
 
 The STL simulation vectors and procedural texture policy stay in private host
 storage, not Core or an ECS component. Only POD `EmitterState` and `CraterState`

@@ -24,8 +24,8 @@ the engine-independent Quat vocabulary rather than Jolt types.
   It extends no vtable; the whole settings/viewport chain validates before any
   settings or viewport is committed. The existing Viewport() reads it back.
 - The five Add Shape requests use IAssetLibrary's procedural capabilities,
-  honouring the host's buildBLAS policy. Empty objects also receive source
-  provenance so they survive document extraction.
+  honouring the host's buildBLAS policy. Empty objects receive source provenance.
+  Document extraction preserves that provenance.
 - In scene documents, `extent` is the
   plane extent or round-primitive radius; cylinder/cone `halfExtents.y` is their
   half-height. Primitive shapes are preserved across TOML save/read/instantiate.

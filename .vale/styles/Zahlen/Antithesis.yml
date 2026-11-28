@@ -1,0 +1,18 @@
+extends: existence
+message: "Remove defensive antithesis phrasing ('%s'); state the behavior directly."
+level: error
+nonword: true
+ignorecase: true
+tokens:
+  - '\bis a refusal,?\s+not(?:\s+(?:an?|the))?\b'
+  - '\b(?:this|it) is [^.,;\n]{1,60},\s*not\s+(?:an?|the)\b'
+  - '\bnot an instruction to\b'
+  - '\bnot an invitation to\b'
+  - '\bnot to be confused with\b'
+  - '\bnot intended (?:as|to)\b'
+  - '\bproves nothing\b'
+  - '\b(?:the )?whole point (?:of|is)\b'
+  - '\b(?:rather than|instead of)(?: being)? (?:silently|quietly|implicitly|blindly|secretly)\b'
+  - '\bby design,?\s*not\b'
+  - '\bnot by accident\b'
+  - '\bis a feature,?\s*not a bug\b'

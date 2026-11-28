@@ -1,0 +1,12 @@
+extends: existence
+message: "Prohibitions and warnings must be quarantined inside a '> [!WARNING]' block, not inline text ('%s')."
+level: error
+scope: raw
+nonword: true
+ignorecase: true
+tokens:
+  - '(?<!>\s*)\bdo not\b'
+  - '(?<!>\s*)\bmust not\b'
+  - '(?<!>\s*)\bnever\b(?! mind)'
+  - '(?<!>\s*)\brefrain from\b'
+  - '(?<!>\s*)\bwarning:'

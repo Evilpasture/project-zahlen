@@ -8,8 +8,8 @@ scene storage, instantiation, validation, and extraction.
 `Instantiate` accepts either `COM::IEngine&` or the four explicit capabilities:
 IEntities, IAssetLibrary, IGraphicsDevice and ISimulation. No Registry, native
 Engine, ModelPrefab, renderer or importer callback is exposed by this path.
-The library's STL return values are ordinary consumer-side C++; they do not
-cross a Core shared-library symbol or COM vtable.
+The library's STL return values remain consumer-side C++ objects. COM signatures
+use the declared capability types.
 
 The host must decode/upload all prefab sources first using its chosen glTF/BSP
 asset library, and retain their ownership manifests for recovery/texture
@@ -75,10 +75,8 @@ a later allocation failure clears the partial replacement to an empty default.
 This convenience is **not** transactional restoration of the previous world.
 Hosts needing staged replacement should orchestrate it themselves.
 
-Material/morph arenas still do not support general individual release. An
-allocation failure can consume material-arena space until renderer teardown;
-entity rollback does not reclaim those arena allocations. Instantiate's
-settings/camera commit is not a general transaction across arbitrary decorators.
+> [!WARNING]
+> Failed instantiation can consume material/morph arena space until renderer teardown. Entity rollback does not reclaim these allocations, and Instantiate does not roll back arbitrary decorator side effects.
 
 ## Limitations
 

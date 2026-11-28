@@ -1,0 +1,36 @@
+extends: existence
+message: "Remove promotional or trivializing qualifier ('%s')."
+level: error
+nonword: true
+ignorecase: true
+tokens:
+  - '\bseamless(?:ly)?\b'
+  - '\bout[- ]of[- ]the[- ]box\b'
+  - '\bfirst[- ]class\b'
+  - '\bzero[- ]boilerplate\b'
+  - '\bnothing to .{1,25} by hand\b'
+  - '\bnever has to\b'
+  - '\bbattle[- ]tested\b'
+  - '\bdrop[- ]in\b'
+  - '\brock[- ]solid\b'
+  - '\bcutting[- ]edge\b'
+  - '\bstate[- ]of[- ]the[- ]art\b'
+  - '\b(?:blazing|ultra)[- ]?fast\b'
+  - '\beffortless(?:ly)?\b'
+  - '\bpainless(?:ly)?\b'
+  - '\bstraightforward(?:ly)?\b'
+  - '\bcleanly\b'
+  - '\bsimply\b'
+  - '\bobviously\b'
+  - '\bof course\b'
+  - '\bclearly\b'
+  - '\bnaturally\b'
+  - '\beasily\b'
+  - '\beasy[- ]to\b'
+  - '\bconvenient(?:ly)?\b'
+  - '\b(?:auto)?magic(?:ally)?\b'
+  - '\btrivial(?:ly)?\b(?![- ](?:copyable|destructible|constructible|default[- ]constructible|assignable|copy[- ]|move[- ]|relocatable|type))'
+  - '(?<!\bnot\s)\bjust\b(?![- ]in[- ]time|\s+(?:before|after|installed|created|added|written|above|below))'
+  - '\brobust(?:ly)?\b'
+  - '\blightweight\b'
+  - '\bpowerful\b'
