@@ -3,7 +3,7 @@
 Two different things carry a version number:
 
 * **zpkg**, the package manager, uses CalVer (`YYYY.MM.DD`, e.g. `2026.11.25`).
-  On Arch it comes from `zahlen-zpkg`. `zpkg --version` shows it.
+  On Arch it comes from `zpkg` (which replaces the former `zahlen-zpkg` package). `zpkg --version` shows it.
 * **the installed engine toolchain** uses the engine release tag
   (`0.6.0-gnu-x86_64-release`, `v0.6.0`). `zpkg list` shows it.
 
@@ -43,11 +43,11 @@ Without `--activate`, `sync` installs the new toolchain and prints the
 ## Rebuild your game
 
 Switching the active toolchain only affects **future** builds; an already-linked
-binary keeps the toolchain it was built against. Reconfigure with the new prefix:
+binary keeps the toolchain it was built against. Reconfigure with the new
+installed toolchain file:
 
 ```sh
-cmake -S my-game -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_CXX_COMPILER=g++-16 -DCMAKE_PREFIX_PATH="$(zpkg prefix)"
+cmake -S my-game -B build --toolchain="$(zpkg prefix)/share/zahlen/ZahlenToolchain.cmake"
 cmake --build build
 ```
 
@@ -55,12 +55,10 @@ cmake --build build
 
 The project signing key is long-lived and pinned at
 [`packaging/keys/zahlen-release.pub`](../packaging/keys/zahlen-release.pub).
-Trust it **once**:
+It is baked into `zpkg` at build time, so there is nothing to trust by hand:
 
 ```sh
-zpkg key add packaging/keys/zahlen-release.pub --name "zahlen release"
-# Arch users: /usr/share/zahlen/zahlen-release-key.pub
-zpkg key list
+zpkg key list   # shows the built-in official key
 ```
 
 Official installs always require a trusted signature, so an unannounced key

@@ -31,22 +31,23 @@ if you choose that path.
 ## 2. Install the engine
 
 The project key is long-lived and pinned in this repository at
-[`packaging/keys/zahlen-release.pub`](../packaging/keys/zahlen-release.pub)
-(Arch users: `/usr/share/zahlen/zahlen-release-key.pub`). Verify its fingerprint
-out of band, then trust it **once**:
+[`packaging/keys/zahlen-release.pub`](../packaging/keys/zahlen-release.pub).
+It is baked into `zpkg` at build time (see `utils/zpkg/CMakeLists.txt`), so
+no manual trust step is needed — the binary you already trust carries the
+key it verifies with, the same model as `pacman` (`archlinux-keyring`) and
+`apt` (`ubuntu-keyring`):
 
 ```sh
-zpkg key add packaging/keys/zahlen-release.pub --name "zahlen release"
 zpkg install
+zpkg key list   # shows the built-in official key
 ```
 
 `install` selects Application and its dependencies from the latest official
 GitHub release. It downloads packages and requires a trusted signature and
-matching archive hashes. The key is committed to git history, so it is not
-self-authenticating: do not trust a `zahlen-release-key.pub` that came only from
-the release page it signs. Deliberate rotations are dual-signed, so an existing
+matching archive hashes. Deliberate rotations are dual-signed, so an existing
 store keeps working; an unannounced rotation is a refusal, not an instruction to
 add another key. See [Upgrading](UPGRADING.md) for the version lifecycle.
+`zpkg key add` remains for trusting other publishers' keys.
 
 To select components or pin a release:
 
@@ -95,14 +96,14 @@ Application does not auto-install every optional module that happened to be
 present in the engine builder.
 
 ```sh
-cmake -S my-game -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_CXX_COMPILER=g++-16 \
-    -DCMAKE_PREFIX_PATH="$(zpkg prefix)"
+cmake -S my-game -B build --toolchain="$(zpkg prefix)/share/zahlen/ZahlenToolchain.cmake"
 cmake --build build
 ```
 
-Use your compiler's actual executable path if it is not called `g++-16`.
-Imported targets propagate C++26, reflection, `-fno-exceptions`, and `-fno-rtti`.
+The installed toolchain file discovers the matching GNU compiler, sets C++26
+and reflection, adds the active prefix to package discovery, and configures
+runtime paths to the installed engine library. Imported targets also propagate
+`-fno-exceptions` and `-fno-rtti` where required.
 `Zahlen::Engine` refers to the prebuilt `libzahlen_engine.so`;
 `Zahlen::Application` builds the application support sources shipped in the store.
 Additional APIs require their own `find_package(Zahlen<Name> CONFIG REQUIRED)`

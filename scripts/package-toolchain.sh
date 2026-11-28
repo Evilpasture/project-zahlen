@@ -197,7 +197,8 @@ fi
 
 # One line per signer. A deliberate rotation publishes BOTH signatures for one
 # release, so stores holding either key still verify it. zpkg accepts a
-# signature from any trusted key and never downloads a key by itself.
+# signature from any trusted key and never downloads a key by itself; the
+# official key is baked into zpkg at build time.
 signers=("${keyfile}:${fingerprint}")
 if [ -n "${ZHLN_RELEASE_KEY_PEM_PREVIOUS:-}" ]; then
     printf '%s' "${ZHLN_RELEASE_KEY_PEM_PREVIOUS}" | base64 -d >"${prevfile}"
@@ -249,5 +250,5 @@ fi
 
 printf '\nrelease contents:\n'
 (cd "${out}" && find . -maxdepth 2 -type f -printf '  %-46p %10s bytes\n' | sort)
-printf '\ninstall with:\n  zpkg key add packaging/keys/zahlen-release.pub --name "zahlen release"\n  zpkg install %s --require-checksums --require-signatures\n' \
+printf '\ninstall with:\n  zpkg install %s --require-checksums --require-signatures\n' \
     "${pkgs}"

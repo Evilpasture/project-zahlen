@@ -23,11 +23,15 @@ endif()
 if(TARGET zahlen_serialization)
     find_package(simdjson CONFIG REQUIRED)
 endif()
-
-set(ZHLN_TOOLCHAIN_PROFILE release)
 if(USE_SANITIZERS)
-    set(ZHLN_TOOLCHAIN_PROFILE asan-ubsan)
+    message(FATAL_ERROR
+        "Toolchain packaging is release-only; configure with -DUSE_SANITIZERS=OFF")
 endif()
+
+# Packaged toolchains are release builds only. Keep the profile in metadata for
+# consumers that inspect toolchain descriptors, but do not expose a consumer-side
+# profile switch.
+set(ZHLN_TOOLCHAIN_PROFILE release)
 
 # Verify libstdc++ dual-ABI setting and forbid debug containers. Deliberately
 # ignore __GLIBCXX__ release date, exact compiler patch version, and git commit
@@ -46,7 +50,7 @@ if(_toolchain_macros MATCHES "#define _GLIBCXX_DEBUG[ \t\r\n]")
 endif()
 
 # Stable cross-distro ABI identity: project version + compiler family + CPU +
-# sanitizer profile + binary-affecting engine switches (no compiler patch
+# release profile + binary-affecting engine switches (no compiler patch
 # version, no git hash, no __GLIBCXX__ date, no Jolt flags).
 string(TOLOWER "${PROJECT_VERSION}-${CMAKE_CXX_COMPILER_ID}-${CMAKE_SYSTEM_PROCESSOR}-${ZHLN_TOOLCHAIN_PROFILE}"
     ZHLN_TOOLCHAIN_ID)
@@ -60,6 +64,17 @@ file(MAKE_DIRECTORY "${ZHLN_TOOLCHAIN_METADATA_DIR}")
 # provenance metadata without locking the ABI hash or package id.
 file(WRITE "${ZHLN_TOOLCHAIN_METADATA_DIR}/toolchain.json"
     "{\"format\":1,\"id\":\"${ZHLN_TOOLCHAIN_ID}\",\"version\":\"${PROJECT_VERSION}\",\"commit\":\"${ZHLN_GIT_HASH}\",\"compiler\":\"${CMAKE_CXX_COMPILER_ID}\",\"compiler_version\":\"${CMAKE_CXX_COMPILER_VERSION}\",\"processor\":\"${CMAKE_SYSTEM_PROCESSOR}\",\"profile\":\"${ZHLN_TOOLCHAIN_PROFILE}\",\"abi\":\"${ZHLN_TOOLCHAIN_ABI}\"}\n")
+
+string(REGEX MATCH "^[0-9]+" ZHLN_TOOLCHAIN_COMPILER_MAJOR "${CMAKE_CXX_COMPILER_VERSION}")
+if(NOT ZHLN_TOOLCHAIN_COMPILER_MAJOR)
+    message(FATAL_ERROR "Cannot determine compiler major version for ZahlenToolchain.cmake")
+endif()
+configure_file(
+    "${PROJECT_SOURCE_DIR}/cmake/toolchain/ZahlenToolchain.cmake.in"
+    "${ZHLN_TOOLCHAIN_METADATA_DIR}/ZahlenToolchain.cmake"
+    @ONLY)
+install(FILES "${ZHLN_TOOLCHAIN_METADATA_DIR}/ZahlenToolchain.cmake"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/zahlen" COMPONENT ZahlenEngine)
 
 function(zhln_toolchain_interface target)
     foreach(prop INCLUDE_DIRECTORIES INTERFACE_INCLUDE_DIRECTORIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES)
@@ -289,11 +304,6 @@ function(zhln_toolchain_source_package name)
         if(P_PUBLIC_LINKS)
             string(APPEND _script "  target_link_libraries(${_tname} PUBLIC ${P_PUBLIC_LINKS})\n")
         endif()
-        if(USE_SANITIZERS AND NOT P_PUBLIC_LINKS)
-            string(APPEND _script "  target_compile_options(${_tname} PUBLIC -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer)\n")
-            string(APPEND _script "  target_link_options(${_tname} PUBLIC -fsanitize=address,undefined -fno-sanitize=vptr)\n")
-            string(APPEND _script "  target_compile_definitions(${_tname} PUBLIC __ASAN_ENABLED__ ZHLN_SANITIZER_BUILD=1)\n")
-        endif()
         if(P_PRIVATE_LINKS)
             string(APPEND _script "  target_link_libraries(${_tname} PRIVATE ${P_PRIVATE_LINKS})\n")
         endif()
@@ -361,11 +371,6 @@ endfunction()
 
 # --- 1. Core shared-library package: libzahlen_engine.so ONLY ---------------
 set_target_properties(zahlen_engine PROPERTIES EXPORT_NAME Engine)
-if(USE_SANITIZERS)
-    target_compile_options(zahlen_engine INTERFACE -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer)
-    target_link_options(zahlen_engine INTERFACE -fsanitize=address,undefined -fno-sanitize=vptr)
-    target_compile_definitions(zahlen_engine INTERFACE __ASAN_ENABLED__ ZHLN_SANITIZER_BUILD=1)
-endif()
 if(ZHLN_DEV_MODE AND ZHLN_DEV_MODE_IN_INSTALLED_PACKAGES)
     target_compile_definitions(zahlen_engine INTERFACE ZHLN_DEV_MODE)
 endif()
@@ -378,13 +383,6 @@ zhln_toolchain_binary_package(Engine TARGETS zahlen_engine HEADERS include)
 # can see <Zahlen/Config.hpp>.
 install(FILES "${ZHLN_GENERATED_INCLUDE_DIR}/Zahlen/Version.hpp"
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen COMPONENT ZahlenEngine)
-if(TARGET zahlen_sanitizer_options)
-    install(FILES $<TARGET_OBJECTS:zahlen_sanitizer_options>
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/zahlen
-        RENAME zahlen_sanitizer_options.o
-        COMPONENT ZahlenEngine)
-endif()
-
 # --- 2. Host shell & standalone utilities (source/header packages) ----------
 zhln_toolchain_source_package(CommandLine
     CHECK_TARGET zahlen_command_line

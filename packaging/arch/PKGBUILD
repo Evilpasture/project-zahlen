@@ -1,6 +1,6 @@
 # Maintainer: Evilpasture <housemaster@evilpasture.org>
 
-pkgname=zahlen-zpkg
+pkgname=zpkg
 _commit=8e717a43d99d36dd6aef3909bda4024aba032e56
 
 pkgver=2026.11.25
@@ -9,6 +9,9 @@ pkgdesc='Per-user package manager for Zahlen engine packages'
 arch=('x86_64' 'aarch64')
 url="https://github.com/Evilpasture/project-zahlen"
 license=('GPL-3.0-or-later')
+provides=('zahlen-zpkg')
+conflicts=('zahlen-zpkg')
+replaces=('zahlen-zpkg')
 
 depends=('gcc-libs' 'zlib' 'zstd' 'openssl' 'curl' 'simdjson')
 makedepends=('cmake' 'ninja' 'gcc')

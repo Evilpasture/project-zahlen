@@ -13,6 +13,7 @@
 //   remotes/<name>                                      where a name resolves to
 //   cache/<sha256>                                      downloaded archives
 #include "zpkg/zpkg.hpp"
+#include "zpkg/BuiltinKeys.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
@@ -415,23 +416,41 @@ auto Store::Keys() const -> std::expected<std::vector<std::pair<std::string, std
     std::vector<std::pair<std::string, std::string>> trusted;
     std::error_code                                  ec;
     const fs::path                                   directory = m_env.root / "keys";
-    if (!fs::is_directory(Native(directory), ec))
-        return trusted;
-    for (const auto& entry: fs::directory_iterator(Native(directory), ec)) {
-        if (entry.path().extension() != ".key")
-            continue;
-        const std::string fingerprint = entry.path().stem().string();
-        std::string       name;
-        const fs::path    named = entry.path().parent_path() / (fingerprint + ".name");
-        if (PathExists(named)) {
-            auto text = ReadFile(named);
-            if (!text)
-                return std::unexpected(std::move(text.error()));
-            name = Trim(*text);
+    if (fs::is_directory(Native(directory), ec)) {
+        for (const auto& entry: fs::directory_iterator(Native(directory), ec)) {
+            if (entry.path().extension() != ".key")
+                continue;
+            const std::string fingerprint = entry.path().stem().string();
+            std::string       name;
+            const fs::path    named = entry.path().parent_path() / (fingerprint + ".name");
+            if (PathExists(named)) {
+                auto text = ReadFile(named);
+                if (!text)
+                    return std::unexpected(std::move(text.error()));
+                name = Trim(*text);
+            }
+            trusted.emplace_back(fingerprint, name);
         }
-        trusted.emplace_back(fingerprint, name);
+        std::sort(trusted.begin(), trusted.end());
     }
-    std::sort(trusted.begin(), trusted.end());
+    // The official release key is baked into the binary (see CMakeLists.txt),
+    // so it is trusted even on a fresh store. A copy the user added with
+    // `key add` keeps its own name and is not listed twice.
+    if (!BuiltinOfficialKey.empty()) {
+        if (auto builtin = ParsePublicKey(BuiltinOfficialKey)) {
+            const std::string fingerprint = KeyFingerprint(*builtin);
+            const bool        already     = [&] {
+                for (const auto& [known, name]: trusted) {
+                    (void) name;
+                    if (known == fingerprint)
+                        return true;
+                }
+                return false;
+            }();
+            if (!already)
+                trusted.insert(trusted.begin(), {fingerprint, "official (built-in)"});
+        }
+    }
     return trusted;
 }
 
@@ -450,16 +469,28 @@ auto Store::KeyRemove(const std::string& fingerprint) -> std::expected<void, Fai
 auto Store::TrustedKey(const std::string& fingerprint) const -> std::expected<std::optional<std::vector<uint8_t>>, Fail> {
     std::error_code ec;
     const fs::path  directory = m_env.root / "keys";
-    if (!fs::is_directory(Native(directory), ec))
-        return std::nullopt;
-    for (const auto& entry: fs::directory_iterator(Native(directory), ec)) {
-        if (entry.path().extension() != ".key")
-            continue;
-        const std::string candidate = entry.path().stem().string();
-        // Prefix match, so a signature may name a short fingerprint.
-        if (candidate != fingerprint && !StartsWith(candidate, fingerprint))
-            continue;
-        return ReadFile(entry.path()).and_then([](std::string text) { return ParsePublicKey(text); });
+    // 1. User-added keys on disk (custom publishers, or an explicit copy of
+    //    the official key). These win over the built-in key.
+    if (fs::is_directory(Native(directory), ec)) {
+        for (const auto& entry: fs::directory_iterator(Native(directory), ec)) {
+            if (entry.path().extension() != ".key")
+                continue;
+            const std::string candidate = entry.path().stem().string();
+            // Prefix match, so a signature may name a short fingerprint.
+            if (candidate != fingerprint && !StartsWith(candidate, fingerprint))
+                continue;
+            return ReadFile(entry.path()).and_then([](std::string text) { return ParsePublicKey(text); });
+        }
+    }
+    // 2. The official key baked into the binary at build time, unless the
+    //    build disabled it (BuiltinOfficialKey empty).
+    if (!BuiltinOfficialKey.empty()) {
+        auto builtin = ParsePublicKey(BuiltinOfficialKey);
+        if (builtin) {
+            const std::string builtinFingerprint = KeyFingerprint(*builtin);
+            if (builtinFingerprint == fingerprint || StartsWith(builtinFingerprint, fingerprint))
+                return builtin;
+        }
     }
     return std::nullopt;
 }

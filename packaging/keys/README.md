@@ -1,15 +1,16 @@
 # Release signing key
 
-`zahlen-release.pub` is the **long-lived** public key users trust once with
-`zpkg key add`. `FINGERPRINT` is the first 32 hex characters of SHA-256 over the
+`zahlen-release.pub` is the **long-lived** public key `zpkg` embeds at build
+time (see `utils/zpkg/CMakeLists.txt`), so users never trust it by hand.
+`FINGERPRINT` is the first 32 hex characters of SHA-256 over the
 raw 32-byte public key — the same value `zpkg key list`, the `.ed25519` signer
 lines, `KEY-FINGERPRINT.txt` and the release notes print.
 
-Because the key is committed to this repository, git history is the out-of-band
-trust anchor: download the `.pub` from here (or from the Arch package, which
-installs it to `/usr/share/zahlen/zahlen-release-key.pub`), verify the
-fingerprint, and trust it once. A key that is only published inside the release
-it signs proves nothing.
+Because the key is committed to this repository, git history is the trust
+anchor: the build reads this file and bakes it into the binary, the same model
+as `pacman` (`archlinux-keyring`) and `apt` (`ubuntu-keyring`). A key that is
+only published inside the release it signs proves nothing; this one is pinned
+here, in git, and in the binary. `zpkg key add` remains for other publishers.
 
 ## The private half
 
@@ -36,10 +37,12 @@ rotation:
 2. Put the **new** private key in `ZHLN_RELEASE_KEY_PEM` and the **old** one in
    `ZHLN_RELEASE_KEY_PEM_PREVIOUS`.
 3. Publish one dual-signed release, so stores holding either key still install.
-4. Tell users to trust the new key, then drop `ZHLN_RELEASE_KEY_PEM_PREVIOUS`.
+4. Ship a new `zpkg` built from the new `.pub`, then drop
+   `ZHLN_RELEASE_KEY_PEM_PREVIOUS`.
 
-Users who pinned the old key can still verify the transition release; users who
-never trusted a key can add the new one. `scripts/check-release-consistency.sh`
+Users who pinned the old key can still verify the transition release; users
+with a `zpkg` built from the new key verify it through the built-in key.
+`scripts/check-release-consistency.sh`
 fails if a release is signed by a key that is not the pinned one, so a silent
 rotation cannot reach a published asset.
 

@@ -43,9 +43,16 @@ with tempfile.TemporaryDirectory(prefix="zpkg-cli-") as tmp:
         run(*args, code=2)
     # Usage failures must not create a store.
     assert not (root / "store").exists()
-    run("install", code=1, contains="zpkg key add")
-    run("install", "application", code=1, contains="zpkg key add")
-    run("install", "application", "image", code=1, contains="zpkg key add")
+    # The official key is baked into zpkg at build time, so a fresh store
+    # already lists it and install no longer stops at the trust-store gate.
+    # A build with -DZPKG_BUILTIN_RELEASE_KEY=OFF keeps the old gate.
+    listed = run("key", "list")
+    if "official (built-in)" in listed:
+        assert "no trusted keys" not in listed, listed
+    else:
+        run("install", code=1, contains="zpkg key add")
+        run("install", "application", code=1, contains="zpkg key add")
+        run("install", "application", "image", code=1, contains="zpkg key add")
     run("install", "application", "--only", "image", code=2, contains="not both")
     run("install", "application", "--version", "../bad", code=2, contains="invalid release tag")
     run("install", "application", "--from", "local", "--version", "v1", code=2)

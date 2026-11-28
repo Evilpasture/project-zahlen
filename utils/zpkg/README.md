@@ -12,15 +12,17 @@ toolchain is shown by `zpkg list` / `zpkg info`.
 
 The project signing key is long-lived, committed at
 [`packaging/keys/zahlen-release.pub`](../../packaging/keys/zahlen-release.pub)
-and installed by the Arch package to `/usr/share/zahlen/zahlen-release-key.pub`.
-Trust it once with `zpkg key add`; verify its fingerprint out of band. A release
-signed by any other key is a refusal, not an instruction to add another key.
-See [Upgrading](../../docs/UPGRADING.md).
+and baked into `zpkg` at build time (see `CMakeLists.txt`), so no manual
+trust step is needed — the binary carries the key it verifies with, the same
+model as `pacman` (`archlinux-keyring`) and `apt` (`ubuntu-keyring`). A
+release signed by any other key is a refusal, not an instruction to add
+another key. See [Upgrading](../../docs/UPGRADING.md). `zpkg key add` remains
+for trusting other publishers' keys.
 
 ## Install a release
 
-After trusting the publisher key, run `zpkg install` to get Application and its
-dependencies. Component names can be shortened:
+Run `zpkg install` to get Application and its dependencies. Component names
+can be shortened:
 
 ```sh
 zpkg install application
@@ -31,7 +33,8 @@ zpkg install application --from studio
 The built-in `official` source uses GitHub Releases, with `latest` as the default
 release. `--version` selects an exact release tag. Official installs and
 `--from` component installs require a trusted signature over the index and
-verify archive hashes. Keys are never downloaded or trusted automatically.
+verify archive hashes. Keys are never downloaded; the official key is built
+in, and other publishers' keys are trusted per store with `zpkg key add`.
 
 Existing local paths take precedence over component names. A bare configured
 remote installs its whole toolchain; `remote:component` retains the explicit
@@ -208,13 +211,13 @@ download of everything that is not in the closure.
 <fingerprint-hex> <base64 ed25519 signature>
 ```
 
-The signature covers the exact bytes of the file named before the extension. A
-key is trusted per store with `zpkg key add <key.pub> --name <who>`, so the same
-signature is accepted on a machine where the publisher is trusted and refused
-everywhere else. Multiple lines are allowed: `zpkg` accepts a signature from any
-trusted key, which is how a deliberate key rotation publishes one dual-signed
-release instead of forcing every user to re-add a key. The project key is pinned
-at [`packaging/keys/`](../../packaging/keys/README.md); a release signed by an
+The signature covers the exact bytes of the file named before the extension. The
+project key is built into `zpkg` (see `CMakeLists.txt`), so official releases
+verify with no `key add`; other publishers' keys are trusted per store with
+`zpkg key add <key.pub> --name <who>`. Multiple lines are allowed: `zpkg`
+accepts a signature from any trusted key, which is how a deliberate key
+rotation publishes one dual-signed release. The project key is pinned at
+[`packaging/keys/`](../../packaging/keys/README.md); a release signed by an
 unknown key is a refusal, not an instruction to trust it. zpkg never signs; a
 release job does:
 
