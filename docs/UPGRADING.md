@@ -5,7 +5,7 @@ Two different things carry a version number:
 * **zpkg**, the package manager, uses CalVer (`YYYY.MM.DD`, e.g. `2026.11.25`).
   On Arch it comes from `zpkg` (which replaces the former `zahlen-zpkg` package). `zpkg --version` shows it.
 * **the installed engine toolchain** uses the engine release tag
-  (`0.6.0-gnu-x86_64-release`, `v0.6.0`). `zpkg list` shows it.
+  (`0.7.0-gnu-x86_64-release`, `v0.7.0`). `zpkg list` shows it.
 
 Upgrading the PKGBUILD bumps **only the manager**. It does not touch the
 per-user store at `$ZHLN_ROOT/store/<toolchain-id>/`, so an engine upgrade is a
@@ -83,9 +83,9 @@ Removing an old key means old release archives can no longer be verified.
 `sync` is a convenience over these commands; both are valid:
 
 ```sh
-zpkg install official --version v0.6.0        # all packages of a pinned release
-# or: zpkg install --version v0.6.0           # Application + its dependencies
-zpkg use 0.6.0-gnu-x86_64-release
+zpkg install official --version v0.7.0        # all packages of a pinned release
+# or: zpkg install --version v0.7.0           # Application + its dependencies
+zpkg use 0.7.0-gnu-x86_64-release
 ```
 
 For a fresh install and the game build itself, see [Consuming Zahlen](CONSUMING.md).
