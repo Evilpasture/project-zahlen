@@ -9,9 +9,6 @@ pkgdesc='Per-user package manager for Zahlen engine packages'
 arch=('x86_64' 'aarch64')
 url="https://github.com/Evilpasture/project-zahlen"
 license=('GPL-3.0-or-later')
-provides=('zahlen-zpkg')
-conflicts=('zahlen-zpkg')
-replaces=('zahlen-zpkg')
 
 depends=('gcc-libs' 'zlib' 'zstd' 'openssl' 'curl' 'simdjson')
 makedepends=('cmake' 'ninja' 'gcc')
