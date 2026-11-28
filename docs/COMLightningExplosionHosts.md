@@ -33,7 +33,10 @@ positions as supplied, including cloud X/Z.
 The host preserves the real particle distributions, drag/gravity, fire/smoke
 billboard batches, four air fronts and ground ring, fading flash light,
 48-particle mesh-debris emitter, procedural DSP audio, and autonomous crater
-projection/fade. Explosions do not apply blast impulses.
+projection/fade.
+
+> [!WARNING]
+> Explosion effects omit blast impulses; physics bodies receive no impulse.
 
 The STL simulation vectors and procedural texture policy stay in private host
 storage, not Core or an ECS component. Only POD `EmitterState` and `CraterState`

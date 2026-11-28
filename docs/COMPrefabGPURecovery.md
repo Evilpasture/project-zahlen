@@ -9,8 +9,10 @@ GPU-only commit, not a new prefab registration or general asset hot reload.
   not invalidated by replacing the cache entry.
 - One `PrefabPartGPUInfo` per original part, in original order, with the same
   unique mesh/material keys and morph target count. New parts may share the
-  same uploaded primitive. They must not borrow buffers/material slots from
-  any of the old parts: old resources are retired on success.
+  same uploaded primitive.
+
+> [!WARNING]
+> Do not borrow buffers or material slots from old parts; successful replacement retires those resources.
 - The supplied device generation must match the current engine. The expected
   revision must match the cached prefab. Revisions minted through COM are
   monotonic within that engine, including across cache clears; a stale owning
@@ -72,39 +74,48 @@ currently published image set.
 
 On success the owning Asset is updated in place. Same-device old textures are
 unloaded only after commit. After device recreation, old texture IDs are
-renderer-scoped and can be numerically reused. Discard old texture IDs
-without unloading them through the new renderer. Never independently unload an
-old-generation manifest on a new-generation device.
+renderer-scoped and can be numerically reused. Discard old IDs without unloading
+them through the new renderer.
 
-Unpublished GPU mesh/texture uploads roll back on error; the owner and cached
-prefab revision do not change. Material instances and morph data still use
-engine arenas without a general individual-free API: failed attempts may
-consume arena space until renderer teardown. This is not an atomic transaction
-across all renderer arenas. Successful replacement retires old default material
-slots as well as mesh buffers. Recovery does not rebuild collision geometry.
+> [!WARNING]
+> Do not unload an old-generation manifest through a new-generation device; reused IDs may refer to current-generation resources.
+
+Unpublished GPU mesh and texture uploads roll back on error. Failed uploads
+preserve the owner and cached prefab revision. Successful replacement retires old
+default material slots and mesh buffers. Recovery leaves collision geometry
+unchanged.
+
+> [!WARNING]
+> Failed attempts can consume material and morph arena space until renderer teardown.
 
 At final shutdown: despawn users, clear the cache, then unload the current
-Asset's texture manifest using its owning device generation. ClearCache is not
-a recovery operation and must not run underneath live animator bindings.
+Asset's texture manifest using its owning device generation.
+
+> [!WARNING]
+> ClearCache invalidates live animator bindings.
 
 ## Controlled renderer reset
 
-`IEngine::RecreateGraphicsDevice()` exposes the existing synchronous renderer
-recreation path for explicit controlled resets. Invoke between frames; on
-success `DeviceGeneration` advances, prefab GPU readiness becomes false, and
-host assets/UI can republish resources before the next frame. A failed renderer
-recreation is a fatal/unusable-device condition unless the host has its own
-well-defined recovery policy. Normal engine-detected device loss already uses
-the same recreation path. Host code can poll generations without registering
-callbacks.
+`IEngine::RecreateGraphicsDevice()` exposes synchronous renderer recreation
+for controlled resets. Invoke it between frames. Success advances
+`DeviceGeneration` and clears prefab GPU readiness. The host republishes
+assets/UI before the next frame. Engine-detected device loss uses the same path.
+Host code polls generations without registering callbacks.
 
-The state/alias checks were exercised on VM lavapipe with live entities,
-actual renderer teardown/recreation and `buildBLAS=false`, without a draw
-submission. Separate `initial_skin_morph_frame` and
-`recovered_skin_morph_frame` integration tests remain enabled in the suite.
-Repeated frame submissions intermittently SIGSEGV on this VM, including an
-initial-frame diagnostic using the original upstream glTF Upload implementation
-and no replacement/reset. Recovered-frame rendering remains unverified, and the
-precise underlying cause remains open. No injected NVIDIA hardware-device-loss
-or animation-playback conformance is claimed. Native compatibility entry points remain available; do not mix a
-native mutable loader and a COM owning lease for the same virtual path.
+> [!WARNING]
+> Failed renderer recreation leaves the device unusable without a host recovery policy.
+
+The state/alias checks ran on VM lavapipe with live entities, renderer
+teardown/recreation and `buildBLAS=false`, without a draw submission. The
+`initial_skin_morph_frame` and `recovered_skin_morph_frame` tests remain enabled.
+
+> [!WARNING]
+> Repeated frame submissions intermittently SIGSEGV on this VM, including the initial-frame diagnostic with the original glTF Upload implementation and no replacement/reset. Recovered-frame rendering remains unverified; the cause remains open.
+
+> [!WARNING]
+> NVIDIA hardware device-loss and animation-playback conformance remain untested.
+
+Native compatibility entry points remain available.
+
+> [!WARNING]
+> Do not use a native mutable loader and a COM owning lease for the same virtual path; both can mutate ownership of its resources.

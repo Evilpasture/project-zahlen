@@ -51,8 +51,8 @@ shared with the legacy importer rather than reimplemented in the COM path.
 
 Moving door/button submodels are omitted from the world mesh and collider,
 cached under `<map>#model_N`, and rebased only when their vertices were authored
-in world space. Already-local geometry stays local. Moving brushes do not get
-static VRAD atlas pages. Authored lights are not gathered into the world prefab
+in world space. Already-local geometry stays local. Static VRAD atlas pages are
+reserved for world geometry. Authored lights are not gathered into the world prefab
 in addition to the scene description; existing optional lighting-floor behavior
 is retained. Static/dynamic Studio prop model requests remain explicit host work.
 

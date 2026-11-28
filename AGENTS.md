@@ -63,3 +63,16 @@ Before outputting or committing edits to any `.md` file or user-facing comment:
 1. Delete every clause explaining *why* an engineering choice was made unless the document's scope is explicitly architectural rationale.
 2. Delete every mention of `scripts/`, CI workflows, `USE_SANITIZERS`, or historical tool versions from consumer guides (`docs/CONSUMING.md`, `docs/UPGRADING.md`, `docs/FIRST_GAME.md`, `docs/REQUIREMENTS.md`).
 3. Verify every remaining sentence states a testable fact, path, command, precondition, or failure mode.
+
+## 7. Prohibitions, Invariants, and Warnings
+
+Plain prose paragraphs describe affirmative facts, valid states, inputs, and commands. Do not put inline prohibitions such as “do not,” “never,” or “must not” in standard body paragraphs.
+
+Place each critical failure condition, destructive caveat, or negative invariant in its own GitHub-flavored Markdown alert block:
+
+> [!WARNING]
+> Do not mix native mutable loaders and a COM owning lease for the same virtual path; both can mutate its asset ownership.
+
+Rules:
+1. Standard paragraphs contain affirmative, declarative facts or imperative instructions.
+2. Each alert block contains exactly one warning. State the prohibited action and its immediate failure mode directly. Omit conversational padding.

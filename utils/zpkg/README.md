@@ -30,8 +30,8 @@ zpkg install application --from studio
 The built-in `official` source uses GitHub Releases, with `latest` as the default
 release. `--version` selects an exact release tag. Official installs and
 `--from` component installs require a trusted signature over the index and
-verify archive hashes. Keys are never downloaded; the official key is built
-in, and other publishers' keys are trusted per store with `zpkg key add`.
+verify archive hashes. The official key is built into `zpkg`; other publishers'
+keys are trusted per store with `zpkg key add`.
 
 Existing local paths take precedence over component names. A bare configured
 remote installs its whole toolchain; `remote:component` retains the explicit
@@ -165,10 +165,9 @@ Install options: `--from <remote>`, `--version <tag>`, `--only a,b`, `--toolchai
 `-s/--require-signatures`, `--ignore-missing`, `--force`, `--quiet`.
 Sync options: `--from`, `--version`, `--activate`, `--dry-run`, `--force`, `--quiet`.
 
-`sync` never updates a toolchain in place. It reads the package names recorded
-in the active toolchain, resolves their closure against the target release's
-signed `index.json`, and installs into that release's own immutable toolchain
-directory. Without `--activate` it leaves `ACTIVE` alone and prints the
+`sync` installs the selected package set into a new immutable toolchain
+directory. It reads package names from the active toolchain and resolves their
+dependency closure against the target release's signed `index.json`. Without `--activate` it leaves `ACTIVE` alone and prints the
 `zpkg use <id>` command; with `--activate` it switches and warns that binaries
 already linked keep the toolchain they were built against.
 

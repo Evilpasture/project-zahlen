@@ -21,10 +21,11 @@ if (auto advanced = pipeline->AdvanceFrame(dt); !advanced.HasValue()) {
 }
 ```
 
-All operations are synchronous on the single host/frame-owner thread. Do not
-pump events, run another simulation step or concurrently mutate the world
-between AdvanceFrame and FinishFrame. This seam handles camera/tool presentation
-after physics and transform propagation.
+All operations are synchronous on the single host/frame-owner thread. This seam
+handles camera/tool presentation after physics and transform propagation.
+
+> [!WARNING]
+> Do not pump events, run another simulation step or concurrently mutate the world between AdvanceFrame and FinishFrame; these actions invalidate the pending frame state.
 
 ## Order and state
 
@@ -38,9 +39,10 @@ and the fixed-step clock once, and executes through core SceneCleanup:
 It leaves the engine ready for host-owned camera policy. FinishFrame executes
 the remaining frozen plan: compatibility camera steps (if explicitly installed),
 core camera projection, visibility/render/presentation and transform history.
-Hosts must not install a native camera writer that competes with a host camera
-writer on the same entity. New native plan entries are not added to a pending
-frame's step snapshot.
+New native plan entries are not added to a pending frame's step snapshot.
+
+> [!WARNING]
+> Do not install a native camera writer on an entity with a host camera writer; competing writers can overwrite camera state.
 
 The delta and fixed-step batch cannot change between halves. The old Tick(dt)
 remains supported and advances and finishes through the same code.
@@ -50,14 +52,13 @@ A finish/cancel without a ready frame returns NoPendingFrame. Negative,
 infinite and NaN deltas are refused with InvalidDeltaTime. Zero is supported.
 CurrentFrame advances exactly once when a consumed frame completes or is
 cancelled, and once on a consumed frame-step failure, preserving the previous
-Tick failure-counting convention. Invalid protocol calls do not increment it.
-CurrentFrame counts consumed frames. GPU presentations do not affect it.
+Tick failure-counting convention. CurrentFrame counts consumed frames. Invalid
+protocol calls leave it unchanged.
 
 CancelFrame does not roll back simulation. It discards the entire suffix and
 counts the consumed frame, without committing camera or transform presentation
-history. That history still describes the previous presented image, rather
-than an intermediate pose that was never drawn. No native extension suffix
-steps are replayed. Destroying an engine with a pending frame is safe: the
+history. History records the previous presented image. Cancelled intermediate
+poses remain unpresented. No native extension suffix steps are replayed. Destroying an engine with a pending frame is safe: the
 synchronous prefix owns no in-flight graph work, and normal teardown releases
 its world without submitting the suffix.
 

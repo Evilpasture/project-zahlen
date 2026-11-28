@@ -37,9 +37,9 @@ The policy used by engine SceneResources and the debugger is one definition.
 
 help/?, types, type, entity/inspect, get, set, patch, sym/addr and find remain.
 Numeric entity/address tokens now require complete parsing (no trailing junk).
-The `patch` command always reports that Lua patching is unavailable: scripting
-lives in `zahlen_plugin_lua` and the standalone Lua sandbox host, never in the
-Console translation unit. Zahlen value/matrix/quat Lua conversions are kept with
+The `patch` command reports that Lua patching is unavailable. Lua scripting
+resides in `zahlen_plugin_lua` and the standalone sandbox host. The Console
+translation unit contains no Lua implementation. Zahlen value/matrix/quat Lua conversions are kept with
 the Lua implementation in ValueTypes.hpp; Scene.hpp keeps the existing native
 Jolt adapters for unported callers.
 
@@ -72,14 +72,16 @@ not interchangeable: cross-world boxes are refused.
 
 Array snapshots recursively stamp contained boxes, including nested arrays.
 Assignment resolves boxed RHS values recursively before invoking typed setters,
-so arrays of structs can be copied without stale pointers. Host-owned raw boxes
-remain local borrowed values whose lifetime the caller must manage. They never
-turn a non-POD host object into engine storage. FixedString fields cross the
+so arrays of structs can be copied without stale pointers. Host-owned raw boxes remain local borrowed values. Callers manage their
+lifetimes. Non-POD host objects remain outside engine storage. FixedString fields cross the
 host binder as strings; over-capacity assignment fails instead of truncating.
 
-The public ResolveBoxedPointer helper returns a synchronously borrowed POD
-interior pointer for immediate host-side reflection only, never a registry or
-native resource object. Do not cache that result across operations/mutations.
+The public ResolveBoxedPointer helper returns a borrowed POD interior pointer
+for immediate host-side reflection. It exposes no registry or native resource
+object.
+
+> [!WARNING]
+> Do not retain the ResolveBoxedPointer result across operations or mutations; later mutations can invalidate the borrowed pointer.
 
 ## Packages and verification
 
