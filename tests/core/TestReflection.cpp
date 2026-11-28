@@ -2,17 +2,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Reflection/Callable.hpp>
 #include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/Reflection/CanonicalName.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Core/Reflection/Dynamic.hpp>
+#include <Zahlen/Core/Reflection/LayoutHash.hpp>
+#include <Zahlen/Core/Reflection/TypeKey.hpp>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <algorithm>
 #include <array>
 #include <expected>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <vector>
 
 // ============================================================================
 // Test Enums & Structs
@@ -444,6 +451,60 @@ struct ReflectionTestSuite {
             int counter = 5;
             ZHLN::TestReflectionFixtures::ExternalHiddenSampleFn(counter, 3.0f);
             ZHLN::Test::ExpectEq(counter, 8);
+            return {};
+        }
+
+        // --- 9. Compile-Time TypeKey Identity ---
+        std::expected<void, ZHLN::ErrorCode> type_key_covers_public_anonymous_and_local_types() {
+            static_assert(ZHLN::Reflect::TypeKey<QualifiedNamesTest::Outer::Value>()
+                          == ZHLN::Hash64(ZHLN::Reflect::CanonicalTypeName<QualifiedNamesTest::Outer::Value>()));
+            static_assert(ZHLN::Reflect::TypeKey<const QualifiedNamesTest::Outer::Value&>()
+                          == ZHLN::Reflect::TypeKey<QualifiedNamesTest::Outer::Value>());
+            static_assert(ZHLN::Reflect::TypeKey<QualifiedNamesTest::Outer::Value>()
+                          != ZHLN::Reflect::TypeKey<QualifiedNamesTest::Other::Value>());
+            static_assert(ZHLN::Reflect::TypeKey<QualifiedNamesTest::TemplateOuter<int>>()
+                          != ZHLN::Reflect::TypeKey<QualifiedNamesTest::TemplateOuter<float>>());
+
+            auto makeFirstLocal = []() consteval -> uint64_t {
+                struct LocalA { int x; };
+                return ZHLN::Reflect::TypeKey<LocalA>();
+            };
+            auto makeSecondLocal = []() consteval -> uint64_t {
+                struct LocalA { int x; };
+                return ZHLN::Reflect::TypeKey<LocalA>();
+            };
+            constexpr uint64_t localKey1 = makeFirstLocal();
+            constexpr uint64_t localKey2 = makeSecondLocal();
+            static_assert(localKey1 != 0);
+            static_assert(localKey2 != 0);
+            static_assert(localKey1 != localKey2);
+
+            struct LocalB { int x; };
+            static_assert(ZHLN::Reflect::TypeKey<QualifiedNamesTest::TemplateOuter<LocalB>>() != 0);
+            static_assert(ZHLN::Reflect::TypeKey<decltype([] {})>() != ZHLN::Reflect::TypeKey<decltype([] {})>());
+
+            ZHLN::Test::ExpectTrue(localKey1 != localKey2);
+            return {};
+        }
+
+        // --- 10. All ZHLN::Components Are Standard-Layout Trivially-Copyable PODs ---
+        std::expected<void, ZHLN::ErrorCode> all_engine_components_are_trivially_copyable_standard_layout_pods() {
+            std::vector<uint64_t> typeKeys;
+            size_t                componentCount = 0;
+            ZHLN::Reflect::ForEachNestedType<ZHLN::Components>([&]<typename Comp>() {
+                static_assert(std::is_trivially_copyable_v<Comp>, "Every ZHLN::Components member must be trivially copyable POD");
+                static_assert(std::is_standard_layout_v<Comp>, "Every ZHLN::Components member must be standard layout");
+                constexpr uint64_t key  = ZHLN::Reflect::TypeKey<Comp>();
+                constexpr uint64_t hash = ZHLN::Reflect::LayoutHash<Comp>();
+                static_assert(key != 0);
+                static_assert(hash != 0);
+                typeKeys.push_back(key);
+                ++componentCount;
+            });
+            ZHLN::Test::ExpectTrue(componentCount >= 35);
+            std::ranges::sort(typeKeys);
+            ZHLN::Test::ExpectTrue(std::ranges::adjacent_find(typeKeys) == typeKeys.end());
+            static_assert(sizeof(ZHLN::Components::CSGCutterComponent) == 12);
             return {};
         }
     };

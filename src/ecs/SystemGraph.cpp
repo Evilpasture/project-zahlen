@@ -64,8 +64,17 @@ void SystemGraphCore::BindCommandRegistry(Registry& registry, EntityCommandBuffe
 }
 
 void SystemGraphCore::AddSystem(SystemInfo info) {
-    _nodes.push_back({.info = std::move(info), .dependents = {}, .initialDependencyCount = 0});
+    _nodes.push_back(Node {.info = info});
     AdoptLocal(_nodes.back());
+}
+
+void SystemGraphCore::AddSystem(SystemInfo info, std::vector<ResourceAccess> ownedAccesses) {
+    _nodes.push_back(Node {.info = info, .ownedAccesses = std::move(ownedAccesses)});
+    Node& node = _nodes.back();
+    if (!node.ownedAccesses.empty()) {
+        node.info.access_pattern = node.ownedAccesses;
+    }
+    AdoptLocal(node);
 }
 
 // The node's state is the graph's to own: it is allocated from the layout the
@@ -76,9 +85,17 @@ void SystemGraphCore::AdoptLocal(Node& node) {
     if (node.info.usesCommandBuffer && _commandRegistry != nullptr) {
         node.ecb = std::make_unique<EntityCommandBuffer>(*_commandRegistry, _commandDestroy);
     }
+    if (!node.info.query_keys.empty()) {
+        node.cachedQuerySets.assign(node.info.query_keys.size(), nullptr);
+        node.cachedSchemaEpoch = ~uint64_t {0};
+    }
 }
 
 bool SystemGraphCore::AddSystemBefore(SystemInfo info, std::string_view beforeSystem) {
+    return AddSystemBefore(info, {}, beforeSystem);
+}
+
+bool SystemGraphCore::AddSystemBefore(SystemInfo info, std::vector<ResourceAccess> ownedAccesses, std::string_view beforeSystem) {
     if (info.name == nullptr || beforeSystem.empty()) {
         return false;
     }
@@ -91,35 +108,46 @@ bool SystemGraphCore::AddSystemBefore(SystemInfo info, std::string_view beforeSy
     if (anchor == _nodes.end()) {
         return false;
     }
-    auto inserted = _nodes.insert(anchor, Node {.info = std::move(info), .dependents = {}, .initialDependencyCount = 0});
+    auto inserted = _nodes.insert(anchor, Node {.info = info, .ownedAccesses = std::move(ownedAccesses)});
+    if (!inserted->ownedAccesses.empty()) {
+        inserted->info.access_pattern = inserted->ownedAccesses;
+    }
     AdoptLocal(*inserted);
     return true;
 }
 
-void SystemGraphCore::DeclareExternalWrites(const char* label, std::vector<ComponentAccess> accesses) {
+void SystemGraphCore::DeclareExternalWrites(const char* label, std::span<const ResourceAccess> accesses) {
     if (label == nullptr || accesses.empty()) {
         return;
     }
+    std::vector<ResourceAccess> owned(accesses.begin(), accesses.end());
     _nodes.push_back(
         Node {
-            .info                   = SystemInfo {.update_func = nullptr, .name = label, .access_pattern = std::move(accesses), .enabled = true},
-            .dependents             = {},
-            .initialDependencyCount = 0,
+            .info          = SystemInfo {.update_func = nullptr, .name = label, .enabled = true},
+            .ownedAccesses = std::move(owned),
         }
     );
+    Node& node               = _nodes.back();
+    node.info.access_pattern = node.ownedAccesses;
 }
 
-[[nodiscard]] bool SystemGraphCore::HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept {
-    for (const auto& accA: systemA.access_pattern) {
-        for (const auto& accB: systemB.access_pattern) {
-            if (accA.familyId == accB.familyId || accA.familyId == AllComponents || accB.familyId == AllComponents) {
-                if (accA.mode == Access::Write || accB.mode == Access::Write) {
-                    return true;
-                }
+void SystemGraphCore::DeclareExternalWrites(const char* label, std::initializer_list<ResourceAccess> accesses) {
+    DeclareExternalWrites(label, std::span<const ResourceAccess>(accesses.begin(), accesses.size()));
+}
+
+[[nodiscard]] bool SystemGraphCore::HasConflict(std::span<const ResourceAccess> accessesA, std::span<const ResourceAccess> accessesB) noexcept {
+    for (const auto& accA: accessesA) {
+        for (const auto& accB: accessesB) {
+            if (AccessesConflict(accA, accB)) {
+                return true;
             }
         }
     }
     return false;
+}
+
+[[nodiscard]] bool SystemGraphCore::HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept {
+    return HasConflict(systemA.access_pattern, systemB.access_pattern);
 }
 
 void SystemGraphCore::Compile() {
@@ -131,8 +159,9 @@ void SystemGraphCore::Compile() {
     }
 
     for (uint32_t i = 0; i < _nodes.size(); ++i) {
+        const auto accI = _nodes[i].EffectiveAccessPattern();
         for (uint32_t j = i + 1; j < _nodes.size(); ++j) {
-            if (HasConflict(_nodes[i].info, _nodes[j].info)) {
+            if (HasConflict(accI, _nodes[j].EffectiveAccessPattern())) {
                 _nodes[i].dependents.push_back(j);
                 _nodes[j].initialDependencyCount++;
             }
@@ -278,9 +307,21 @@ void SystemGraphCore::DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx) {
     };
 
     for (;;) {
-        const Node& node = _nodes[nodeIdx];
+        Node& node = _nodes[nodeIdx];
 
         if (node.info.enabled && node.info.update_func != nullptr && ctx.carrier != nullptr) {
+            SparseSet* const* querySets = nullptr;
+            if (!node.info.query_keys.empty() && _commandRegistry != nullptr) {
+                const uint64_t epoch = _commandRegistry->SchemaEpoch();
+                if (node.cachedSchemaEpoch != epoch) {
+                    for (size_t i = 0; i < node.info.query_keys.size(); ++i) {
+                        node.cachedQuerySets[i] = _commandRegistry->FindSparseSet(node.info.query_keys[i]);
+                    }
+                    node.cachedSchemaEpoch = epoch;
+                }
+                querySets = node.cachedQuerySets.data();
+            }
+
             // Built here, on this dispatcher's own stack: the carrier is shared by
             // every node, the state is not.
             SystemCall call {
@@ -289,6 +330,7 @@ void SystemGraphCore::DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx) {
                 .slots     = node.local.Slots(),
                 .slotCount = node.local.SlotCount(),
                 .ecb       = node.ecb.get(),
+                .querySets = querySets,
             };
             node.info.update_func(&call);
         }

@@ -3,7 +3,9 @@
 
 #include <engine/AssetManager.hpp>
 #include <render/RenderContext.hpp>
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -11,6 +13,130 @@
 #include <utility>
 
 namespace ZHLN {
+
+namespace {
+
+[[nodiscard]] constexpr auto CanonicalFloatBits(float v) noexcept -> uint32_t {
+    return std::bit_cast<uint32_t>(v == 0.0f ? 0.0f : v);
+}
+
+} // namespace
+
+auto HashProceduralMeshID(const ProceduralMeshRecipe& recipe) noexcept -> AssetID {
+    std::size_t h = static_cast<std::size_t>(Hash64("ZHLN::ProceduralMesh::v1"));
+    HashCombine(
+        h,
+        static_cast<std::size_t>(recipe.shape),
+        static_cast<std::size_t>(CanonicalFloatBits(recipe.dimensions.x)),
+        static_cast<std::size_t>(CanonicalFloatBits(recipe.dimensions.y)),
+        static_cast<std::size_t>(CanonicalFloatBits(recipe.dimensions.z)),
+        static_cast<std::size_t>(CanonicalFloatBits(recipe.color.x)),
+        static_cast<std::size_t>(CanonicalFloatBits(recipe.color.y)),
+        static_cast<std::size_t>(CanonicalFloatBits(recipe.color.z)),
+        static_cast<std::size_t>(CanonicalFloatBits(recipe.color.w)),
+        static_cast<std::size_t>(recipe.buildBLAS ? 1u : 0u)
+    );
+    const auto id = static_cast<AssetID>(h);
+    return id == InvalidAssetID ? AssetID {1} : id;
+}
+
+auto HashProceduralMaterialID(const ProceduralMaterialRecipe& recipe) noexcept -> MaterialID {
+    std::size_t h = static_cast<std::size_t>(Hash64("ZHLN::ProceduralMaterial::v1"));
+    HashCombine(
+        h,
+        static_cast<std::size_t>(CanonicalFloatBits(recipe.color.x)),
+        static_cast<std::size_t>(CanonicalFloatBits(recipe.color.y)),
+        static_cast<std::size_t>(CanonicalFloatBits(recipe.color.z)),
+        static_cast<std::size_t>(CanonicalFloatBits(recipe.color.w)),
+        static_cast<std::size_t>(CanonicalFloatBits(recipe.roughness)),
+        static_cast<std::size_t>(CanonicalFloatBits(recipe.metallic))
+    );
+    const auto id = static_cast<MaterialID>(h);
+    return id == InvalidMaterialID ? MaterialID {1} : id;
+}
+
+auto HashMaterialOverrideID(const Material& mat) noexcept -> MaterialID {
+    std::size_t h = static_cast<std::size_t>(Hash64("ZHLN::MaterialOverride::v1"));
+    HashCombine(
+        h,
+        static_cast<std::size_t>(mat.pipeline),
+        static_cast<std::size_t>(mat.prePassPipeline),
+        static_cast<std::size_t>(mat.albedoMap),
+        static_cast<std::size_t>(mat.normalMap),
+        static_cast<std::size_t>(mat.pbrMap),
+        static_cast<std::size_t>(mat.emissiveMap),
+        static_cast<std::size_t>(mat.bakedIrradianceMap),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.bakedIrradianceScale)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.baseColorFactor.x)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.baseColorFactor.y)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.baseColorFactor.z)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.baseColorFactor.w)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.emissiveFactor.x)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.emissiveFactor.y)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.emissiveFactor.z)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.emissiveFactor.w)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.metallicFactor)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.roughnessFactor)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.alphaCutoff)),
+        static_cast<std::size_t>(mat.alphaMode),
+        static_cast<std::size_t>(mat.doubleSided ? 1u : 0u),
+        static_cast<std::size_t>(mat.unlit ? 1u : 0u),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.transmissionFactor)),
+        static_cast<std::size_t>(mat.transmissionMap),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.iridescenceFactor)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.filmThicknessNm)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.filmThicknessMinNm)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.volumeThicknessM)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.ior)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.normalScale)),
+        static_cast<std::size_t>(mat.filmThicknessMap),
+        static_cast<std::size_t>(mat.iridescenceMap),
+        static_cast<std::size_t>(mat.volumeThicknessMap),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.clearcoatFactor)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.clearcoatRoughnessFactor)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.clearcoatNormalScale)),
+        static_cast<std::size_t>(mat.clearcoatMap),
+        static_cast<std::size_t>(mat.clearcoatRoughnessMap),
+        static_cast<std::size_t>(mat.clearcoatNormalMap),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.anisotropyStrength)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.anisotropyRotation)),
+        static_cast<std::size_t>(mat.anisotropyMap),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.sheenColorFactor.x)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.sheenColorFactor.y)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.sheenColorFactor.z)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.sheenRoughnessFactor)),
+        static_cast<std::size_t>(mat.sheenColorMap),
+        static_cast<std::size_t>(mat.sheenRoughnessMap),
+        static_cast<std::size_t>(mat.occlusionMap),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.occlusionStrength)),
+        static_cast<std::size_t>(mat.specularEnabled ? 1u : 0u),
+        static_cast<std::size_t>(mat.environmentReflectionEnabled ? 1u : 0u),
+        static_cast<std::size_t>(mat.environmentReflectionAlphaMask ? 1u : 0u),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.environmentReflectionFactor)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.specularFactor)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.specularColorFactor.x)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.specularColorFactor.y)),
+        static_cast<std::size_t>(CanonicalFloatBits(mat.specularColorFactor.z)),
+        static_cast<std::size_t>(mat.specularMap),
+        static_cast<std::size_t>(mat.specularTexMode)
+    );
+    for (const auto& sampler: mat.textureSamplers) {
+        HashCombine(h, static_cast<std::size_t>(sampler.s), static_cast<std::size_t>(sampler.t));
+    }
+    for (const auto& xform: mat.textureTransforms) {
+        HashCombine(
+            h,
+            static_cast<std::size_t>(CanonicalFloatBits(xform.offset.x)),
+            static_cast<std::size_t>(CanonicalFloatBits(xform.offset.y)),
+            static_cast<std::size_t>(CanonicalFloatBits(xform.scale.x)),
+            static_cast<std::size_t>(CanonicalFloatBits(xform.scale.y)),
+            static_cast<std::size_t>(CanonicalFloatBits(xform.rotation)),
+            static_cast<std::size_t>(xform.texCoord)
+        );
+    }
+    const auto id = static_cast<MaterialID>(h);
+    return id == InvalidMaterialID ? MaterialID {1} : id;
+}
 
 AssetManager::~AssetManager() {
     ClearCache();
@@ -87,6 +213,25 @@ void AssetManager::ReleaseCachedMeshBuffers() noexcept {
             part.mesh = {};
         }
     });
+    {
+        ZHLN::MutexGuard guard(_proceduralMutex);
+        for (auto& [id, entry]: _proceduralMeshes) {
+            if (id != InvalidAssetID) {
+                _renderContext->UnregisterGPUMesh(id);
+            }
+            if (entry.mesh.posBuffer != BufferID::Invalid) {
+                _renderContext->DestroyMesh(entry.mesh);
+                entry.mesh = {};
+            }
+        }
+        for (auto& [id, entry]: _proceduralMaterials) {
+            if (id != InvalidMaterialID) {
+                _renderContext->UnregisterGPUMaterial(id);
+            }
+            entry.material.pipeline        = PipelineID::Invalid;
+            entry.material.prePassPipeline = PipelineID::Invalid;
+        }
+    }
 }
 
 void AssetManager::InvalidateGPUMeshes() noexcept {
@@ -100,7 +245,92 @@ void AssetManager::InvalidateGPUMeshes() noexcept {
             part.defaultMaterial.prePassPipeline = PipelineID::Invalid;
         }
     });
+    {
+        ZHLN::MutexGuard guard(_proceduralMutex);
+        for (auto& [id, entry]: _proceduralMeshes) {
+            (void)id;
+            entry.mesh = {};
+        }
+        for (auto& [id, entry]: _proceduralMaterials) {
+            (void)id;
+            entry.material.pipeline        = PipelineID::Invalid;
+            entry.material.prePassPipeline = PipelineID::Invalid;
+        }
+    }
     _renderContext = nullptr;
+}
+
+auto AssetManager::FindProceduralMesh(AssetID id) const noexcept -> std::optional<Mesh> {
+    if (id == InvalidAssetID) {
+        return std::nullopt;
+    }
+    ZHLN::MutexGuard guard(_proceduralMutex);
+    const auto       it = _proceduralMeshes.find(id);
+    if (it == _proceduralMeshes.end() || it->second.mesh.posBuffer == BufferID::Invalid) {
+        return std::nullopt;
+    }
+    return it->second.mesh;
+}
+
+void AssetManager::CacheProceduralMesh(AssetID id, const ProceduralMeshRecipe& recipe, const Mesh& mesh) {
+    if (id == InvalidAssetID) {
+        return;
+    }
+    Mesh replaced {};
+    {
+        ZHLN::MutexGuard guard(_proceduralMutex);
+        auto&            entry = _proceduralMeshes[id];
+        if (entry.mesh.posBuffer != BufferID::Invalid && entry.mesh.posBuffer != mesh.posBuffer) {
+            replaced = entry.mesh;
+        }
+        entry.recipe = recipe;
+        entry.mesh   = mesh;
+    }
+    if (replaced.posBuffer != BufferID::Invalid && _renderContext != nullptr) {
+        _renderContext->DestroyMesh(replaced);
+    }
+}
+
+auto AssetManager::FindProceduralMaterial(MaterialID id) const noexcept -> std::optional<Material> {
+    if (id == InvalidMaterialID) {
+        return std::nullopt;
+    }
+    ZHLN::MutexGuard guard(_proceduralMutex);
+    const auto       it = _proceduralMaterials.find(id);
+    if (it == _proceduralMaterials.end() || it->second.material.pipeline == PipelineID::Invalid) {
+        return std::nullopt;
+    }
+    return it->second.material;
+}
+
+void AssetManager::CacheProceduralMaterial(MaterialID id, const ProceduralMaterialRecipe& recipe, const Material& material) {
+    if (id == InvalidMaterialID) {
+        return;
+    }
+    ZHLN::MutexGuard guard(_proceduralMutex);
+    auto&            entry = _proceduralMaterials[id];
+    entry.recipe           = recipe;
+    entry.material         = material;
+}
+
+auto AssetManager::CopyProceduralMeshRecipes() const -> std::vector<std::pair<AssetID, ProceduralMeshRecipe>> {
+    ZHLN::MutexGuard guard(_proceduralMutex);
+    std::vector<std::pair<AssetID, ProceduralMeshRecipe>> out;
+    out.reserve(_proceduralMeshes.size());
+    for (const auto& [id, entry]: _proceduralMeshes) {
+        out.emplace_back(id, entry.recipe);
+    }
+    return out;
+}
+
+auto AssetManager::CopyProceduralMaterialRecipes() const -> std::vector<std::pair<MaterialID, ProceduralMaterialRecipe>> {
+    ZHLN::MutexGuard guard(_proceduralMutex);
+    std::vector<std::pair<MaterialID, ProceduralMaterialRecipe>> out;
+    out.reserve(_proceduralMaterials.size());
+    for (const auto& [id, entry]: _proceduralMaterials) {
+        out.emplace_back(id, entry.recipe);
+    }
+    return out;
 }
 
 auto AssetManager::CacheCollisionMesh(CollisionAssetID id, Physics::MeshGeometry geometry) -> bool {
@@ -136,6 +366,11 @@ void AssetManager::ClearCache() noexcept {
         _collisionMeshes.Clear();
     }
     ReleaseCachedMeshBuffers();
+    {
+        ZHLN::MutexGuard guard(_proceduralMutex);
+        _proceduralMeshes.clear();
+        _proceduralMaterials.clear();
+    }
     _prefabCache.Clear();
     _environmentImages.Clear();
 }

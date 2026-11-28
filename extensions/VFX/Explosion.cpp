@@ -26,11 +26,19 @@ struct System::Impl {
     Entity                 resources  = Entity::Null();
     AssetID                meshID     = InvalidAssetID;
     MaterialID             materialID = InvalidMaterialID;
+    Mesh                   debrisMesh {};
     uint64_t               generation = 0;
     std::mt19937           rng {std::random_device {}()};
     auto                   Textures() {
         return std::array<TextureID*, 6> {&policy.s_FireTexID,    &policy.s_SoilTexID,   &policy.s_ShockwaveTexID,
                                           &policy.s_GroundRingID, &policy.s_CraterTexID, &policy.s_CraterNormalTexID};
+    }
+    void DropDebrisMesh() {
+        if (debrisMesh.posBuffer != BufferID::Invalid && generation == engine->DeviceGeneration()) {
+            engine->Graphics()->UnregisterMesh(meshID);
+            engine->Graphics()->DestroyMesh(debrisMesh);
+        }
+        debrisMesh = {};
     }
     void DropTextures() {
         for (auto* texture: Textures()) {
@@ -43,6 +51,7 @@ struct System::Impl {
         auto& entities = *engine->Entities();
         auto& graphics = *engine->Graphics();
         if (!entities.IsAlive(resources) || entities.Get<Components::PendingDestroy>(resources)) {
+            DropDebrisMesh();
             DropTextures();
             graphics.UnregisterMaterial(materialID);
             resources = entities.Spawn(Components::NameComponent {.name = String64("HostExplosionResources")});
@@ -53,6 +62,7 @@ struct System::Impl {
             materialID = HashAssetID("host_explosion_material_" + id);
         }
         if (generation != engine->DeviceGeneration()) {
+            DropDebrisMesh();
             DropTextures();
             generation = engine->DeviceGeneration();
         }
@@ -73,9 +83,7 @@ struct System::Impl {
             }
             *textures[i] = built.value;
         }
-        auto* owner = entities.Get<Components::OwnedMeshComponent>(resources);
-        Mesh  mesh  = owner ? owner->mesh : Mesh {};
-        if (mesh.posBuffer == BufferID::Invalid) {
+        if (debrisMesh.posBuffer == BufferID::Invalid) {
             Mesh built {};
             auto result = graphics.CreateMesh(
                 COM::InChain(COM::BoxMeshDesc {.halfExtents = {.5f, .5f, .5f}, .color = {.28f, .22f, .16f, 1}}, COM::MeshBuildOptions {.buildBLAS = false}),
@@ -83,13 +91,9 @@ struct System::Impl {
             );
             if (!result.HasValue())
                 return std::unexpected(result.error);
-            mesh = built;
-            if (!entities.Attach(resources, Components::OwnedMeshComponent {.meshAsset = meshID, .mesh = mesh})) {
-                graphics.DestroyMesh(mesh);
-                return std::unexpected(COM::Error::InvalidArgument);
-            }
+            debrisMesh = built;
         }
-        graphics.RegisterMesh(meshID, mesh);
+        graphics.RegisterMesh(meshID, debrisMesh);
         if (!graphics.FindMaterial(materialID).HasValue()) {
             MaterialDesc desc = MaterialDesc::Basic();
             desc.roughness    = .94f;
@@ -337,6 +341,7 @@ void System::Clear() {
     _impl->engine->Entities()->Despawn(_impl->resources);
     _impl->resources = Entity::Null();
     _impl->engine->Graphics()->UnregisterMaterial(_impl->materialID);
+    _impl->DropDebrisMesh();
     _impl->DropTextures();
 }
 void System::Stop(COM::IEngine&) {

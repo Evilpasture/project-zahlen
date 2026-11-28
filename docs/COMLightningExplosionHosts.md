@@ -16,10 +16,10 @@ submits the authored thunder event. The fractal ribbon generator is shared
 with the native compatibility adapter. Input validation bounds subdivisions,
 width, current, time dilation, sound and emissive magnitude.
 
-`BoltState` is a POD diagnostic component. CPU geometry is retained by the host;
-GPU buffers are owned by the scene's OwnedMeshComponent. Cache rebinding does
+`BoltState` is a POD diagnostic component. CPU geometry and GPU mesh handles
+are retained by the host keyed on device generation. Cache rebinding does
 not reupload, and device recovery reuploads from retained geometry without
-resetting phase. Ownership replacement precedes asset publication.
+resetting phase.
 
 Unlike the native adapter, this host does **not** overwrite global ambient
 exposure. Owned flash/impact light entities provide flashes without one host

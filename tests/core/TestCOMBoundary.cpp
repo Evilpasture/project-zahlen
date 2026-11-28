@@ -475,18 +475,17 @@ void CheckAssets(ZHLN::COM::IAssetLibrary& assets, ZHLN::COM::IEntities& entitie
     const ZHLN::Entity staticBoxEnt = assets.SpawnBox({0.5F, 0.5F, 0.5F}, spawnParams);
     if (ZHLN::Test::ExpectTrue(staticBoxEnt != ZHLN::Entity::Null())) {
         ZHLN::Test::ExpectTrue(entities.IsAlive(staticBoxEnt));
-        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(staticBoxEnt, "ZHLN::Components::MeshComponent") != nullptr);
-        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(staticBoxEnt, "ZHLN::Components::OwnedMeshComponent") != nullptr);
-        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(staticBoxEnt, "ZHLN::Components::StaticBodyComponent") != nullptr);
-        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(staticBoxEnt, "ZHLN::Components::DynamicBodyComponent") == nullptr);
+        ZHLN::Test::ExpectTrue(entities.GetRaw(staticBoxEnt, "ZHLN::Components::MeshComponent") != nullptr);
+        ZHLN::Test::ExpectTrue(entities.GetRaw(staticBoxEnt, "ZHLN::Components::StaticBodyComponent") != nullptr);
+        ZHLN::Test::ExpectTrue(entities.GetRaw(staticBoxEnt, "ZHLN::Components::DynamicBodyComponent") == nullptr);
         entities.Despawn(staticBoxEnt);
     }
 
     spawnParams.isStaticPhysics = false;
     const ZHLN::Entity dynBoxEnt = assets.SpawnBox({0.5F, 0.5F, 0.5F}, spawnParams);
     if (ZHLN::Test::ExpectTrue(dynBoxEnt != ZHLN::Entity::Null())) {
-        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(dynBoxEnt, "ZHLN::Components::DynamicBodyComponent") != nullptr);
-        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(dynBoxEnt, "ZHLN::Components::StaticBodyComponent") == nullptr);
+        ZHLN::Test::ExpectTrue(entities.GetRaw(dynBoxEnt, "ZHLN::Components::DynamicBodyComponent") != nullptr);
+        ZHLN::Test::ExpectTrue(entities.GetRaw(dynBoxEnt, "ZHLN::Components::StaticBodyComponent") == nullptr);
         entities.Despawn(dynBoxEnt);
     }
 }
@@ -561,7 +560,8 @@ void CheckEngineComponents(ZHLN::COM::IEntities& entities, ZHLN::COM::ISimulatio
     const ZHLN::Entity entity = entities.CreateEntity();
 
     // All fixed-layout engine components (including the four role-typed physics
-    // body components) are published; CSGComponent and legacy PhysicsComponent are not.
+    // body components and CSGCutterComponent) are published; removed/legacy
+    // component names (CSGComponent, OwnedMeshComponent, PhysicsComponent) are not.
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::TransformComponent"));
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::WorldTransformComponent"));
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::PBRComponent"));
@@ -570,29 +570,39 @@ void CheckEngineComponents(ZHLN::COM::IEntities& entities, ZHLN::COM::ISimulatio
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::KinematicBodyComponent"));
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::DynamicBodyComponent"));
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::CharacterBodyComponent"));
+    ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::CSGCutterComponent"));
     ZHLN::Test::ExpectTrue(!entities.IsEngineComponent("ZHLN::Components::PhysicsComponent"));
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::AudioSourceComponent"));
     ZHLN::Test::ExpectTrue(!entities.IsEngineComponent("ZHLN::Components::CSGComponent"));
+    ZHLN::Test::ExpectTrue(!entities.IsEngineComponent("ZHLN::Components::OwnedMeshComponent"));
     ZHLN::Test::ExpectTrue(!entities.IsEngineComponent("ZHLN::Components::NotAComponentAnywhere"));
 
-    ZHLN::Test::ExpectTrue(entities.GetEngineRaw(entity, "ZHLN::Components::WorldTransformComponent") == nullptr);
+    ZHLN::Test::ExpectTrue(entities.GetRaw(entity, "ZHLN::Components::WorldTransformComponent") == nullptr);
+    ZHLN::Test::ExpectTrue(entities.GetRaw(entity, "WorldTransformComponent") == nullptr);
+    ZHLN::Test::ExpectTrue(
+        entities.AttachRaw(
+            entity, "WorldTransformComponent", sizeof(ConsumerSide::WorldTransformComponent), alignof(ConsumerSide::WorldTransformComponent),
+            ZHLN::Reflect::LayoutHash<ConsumerSide::WorldTransformComponent>()
+        ) == nullptr
+    );
 
     ConsumerSide::WorldTransformComponent transform {};
     transform.world.m[0]    = 2.0F;
     transform.previous.m[5] = 3.0F;
 
-    void* attached = entities.AttachEngineRaw(
+    void* attached = entities.AttachRaw(
         entity, "ZHLN::Components::WorldTransformComponent", sizeof(ConsumerSide::WorldTransformComponent), alignof(ConsumerSide::WorldTransformComponent),
         ZHLN::Reflect::LayoutHash<ConsumerSide::WorldTransformComponent>()
     );
     if (ZHLN::Test::ExpectTrue(attached != nullptr)) {
         *static_cast<ConsumerSide::WorldTransformComponent*>(attached) = transform;
 
-        auto* fetched = static_cast<ConsumerSide::WorldTransformComponent*>(entities.GetEngineRaw(entity, "ZHLN::Components::WorldTransformComponent"));
+        auto* fetched = static_cast<ConsumerSide::WorldTransformComponent*>(entities.GetRaw(entity, "ZHLN::Components::WorldTransformComponent"));
         if (ZHLN::Test::ExpectTrue(fetched != nullptr)) {
             ZHLN::Test::ExpectEq(fetched->world.m[0], 2.0F);
             ZHLN::Test::ExpectEq(fetched->previous.m[5], 3.0F);
         }
+        ZHLN::Test::ExpectTrue(entities.GetRaw(entity, "WorldTransformComponent") == nullptr);
         ZHLN::Test::ExpectTrue(!entities.EntitiesWith("ZHLN::Components::WorldTransformComponent").empty());
     }
 
@@ -600,33 +610,33 @@ void CheckEngineComponents(ZHLN::COM::IEntities& entities, ZHLN::COM::ISimulatio
     // destroy the underlying Jolt body rather than leaking it.
     const auto sphereBody = simulation.CreateSphereBody(0.5F, ZHLN::Physics::DynamicBody {.position = {0.0, 8.0, 0.0}});
     if (ZHLN::Test::ExpectTrue(sphereBody.HasValue())) {
-        void* physSlot = entities.AttachEngineRaw(
+        void* physSlot = entities.AttachRaw(
             entity, "ZHLN::Components::DynamicBodyComponent", sizeof(ConsumerSide::DynamicBodyComponent), alignof(ConsumerSide::DynamicBodyComponent),
             ZHLN::Reflect::LayoutHash<ConsumerSide::DynamicBodyComponent>()
         );
         if (ZHLN::Test::ExpectTrue(physSlot != nullptr)) {
             *static_cast<ConsumerSide::DynamicBodyComponent*>(physSlot) = ConsumerSide::DynamicBodyComponent {.bodyID = sphereBody.value};
-            ZHLN::Test::ExpectTrue(entities.DetachEngineRaw(entity, "ZHLN::Components::DynamicBodyComponent"));
+            ZHLN::Test::ExpectTrue(entities.DetachRaw(entity, "ZHLN::Components::DynamicBodyComponent"));
             ZHLN::Test::ExpectTrue(!simulation.BodyPosition(sphereBody.value).HasValue());
         }
     }
 
     // Mismatched size or hash is refused closed.
-    void* mismatched = entities.AttachEngineRaw(
+    void* mismatched = entities.AttachRaw(
         entity, "ZHLN::Components::MeshComponent", sizeof(ConsumerSide::MeshComponent), alignof(ConsumerSide::MeshComponent),
         ZHLN::Reflect::LayoutHash<ConsumerSide::MeshComponent>()
     );
     ZHLN::Test::ExpectTrue(mismatched == nullptr);
 
-    void* sameSizeLie = entities.AttachEngineRaw(
+    void* sameSizeLie = entities.AttachRaw(
         entity, "ZHLN::Components::WorldTransformComponent", sizeof(ConsumerSide::WorldTransformComponent), alignof(ConsumerSide::WorldTransformComponent),
         ZHLN::Reflect::LayoutHash<ConsumerSide::WorldTransformComponent>() ^ 1ULL
     );
     ZHLN::Test::ExpectTrue(sameSizeLie == nullptr);
 
-    ZHLN::Test::ExpectTrue(entities.DetachEngineRaw(entity, "ZHLN::Components::WorldTransformComponent"));
-    ZHLN::Test::ExpectTrue(entities.GetEngineRaw(entity, "ZHLN::Components::WorldTransformComponent") == nullptr);
-    ZHLN::Test::ExpectTrue(!entities.DetachEngineRaw(entity, "ZHLN::Components::MeshComponent"));
+    ZHLN::Test::ExpectTrue(entities.DetachRaw(entity, "ZHLN::Components::WorldTransformComponent"));
+    ZHLN::Test::ExpectTrue(entities.GetRaw(entity, "ZHLN::Components::WorldTransformComponent") == nullptr);
+    ZHLN::Test::ExpectTrue(!entities.DetachRaw(entity, "ZHLN::Components::MeshComponent"));
 
     entities.Despawn(entity);
 }

@@ -65,8 +65,9 @@ struct ConsoleHostSuite {
             auto            read = bridge.GetProperty(target, "PBRComponent", "roughness");
             ExpectTrue(read.has_value());
             const auto canonical = COM::IEntities::ComponentName<Components::PBRComponent>();
-            ExpectTrue(engine->Entities()->GetRaw(target, canonical) == nullptr);
+            ExpectTrue(engine->Entities()->GetRaw(target, canonical) == engine->Entities()->Get<Components::PBRComponent>(target));
             ExpectTrue(engine->Entities()->GetRaw(target, "PBRComponent") == nullptr);
+            ExpectTrue(engine->Entities()->GetRaw(target, "ZHLN::Components::NotAComponent") == nullptr);
             ExpectTrue(engine->Entities()->Get<Components::PBRComponent>(target) != nullptr);
             const auto body = engine->Entities()->Get<Components::DynamicBodyComponent>(target)->bodyID;
             auto       readBody = bridge.GetProperty(target, "DynamicBodyComponent", "bodyID");

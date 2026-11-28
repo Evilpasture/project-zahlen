@@ -112,12 +112,23 @@ struct SceneAssetsSuite {
             spawn(COM::CylinderMeshDesc {});
             spawn(COM::ConeMeshDesc {});
             ExpectEq(spawned.size(), size_t(5));
+            // Spawning an identical primitive reuses the same cached AssetID.
+            const auto dupBox = assets.SpawnPrimitive(COM::InChain(COM::BoxMeshDesc {}, COM::MeshBuildOptions {.buildBLAS = false}));
+            if (ExpectTrue(dupBox.HasValue())) {
+                const auto* firstMesh = engine->Entities()->Get<Components::MeshComponent>(spawned[0]);
+                const auto* dupMesh   = engine->Entities()->Get<Components::MeshComponent>(dupBox.value);
+                ExpectTrue(firstMesh && dupMesh && firstMesh->meshAsset == dupMesh->meshAsset);
+            }
             const auto generation = engine->DeviceGeneration();
             ExpectTrue(engine->RecreateGraphicsDevice().HasValue());
             ExpectTrue(engine->DeviceGeneration() > generation);
             for (auto e: spawned) {
-                const auto* owned = engine->Entities()->Get<Components::OwnedMeshComponent>(e);
-                ExpectTrue(owned && !owned->buildBLAS && owned->mesh.posBuffer != BufferID::Invalid);
+                const auto* mesh = engine->Entities()->Get<Components::MeshComponent>(e);
+                ExpectTrue(mesh != nullptr);
+                if (mesh) {
+                    const auto gpuMesh = engine->Graphics()->FindMesh(mesh->meshAsset);
+                    ExpectTrue(gpuMesh.HasValue() && gpuMesh.value.posBuffer != BufferID::Invalid);
+                }
             }
             // Actual renderer recreation, but no draw is submitted by this state test.
             return {};

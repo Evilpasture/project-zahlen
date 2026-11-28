@@ -223,8 +223,11 @@ struct EditorHostSuite {
             session.simulationRunning = true;
             ExpectTrue(session.Frame(*engine.Get(), ui, .1f).has_value());
             auto* binding = engine->Entities()->Get<Components::MeshComponent>(instance->entities[0]);
-            ExpectTrue(binding && engine->Graphics()->FindMesh(binding->meshAsset).HasValue());
-            ExpectTrue(engine->Entities()->Get<Components::OwnedMeshComponent>(instance->entities[0])->mesh.posBuffer != BufferID::Invalid);
+            ExpectTrue(binding != nullptr);
+            if (binding) {
+                const auto gpuMesh = engine->Graphics()->FindMesh(binding->meshAsset);
+                ExpectTrue(gpuMesh.HasValue() && gpuMesh.value.posBuffer != BufferID::Invalid);
+            }
             for (auto entity: engine->Entities()->EntitiesWith<Components::SceneSourceComponent>()) {
                 const auto* mesh = engine->Entities()->Get<Components::MeshComponent>(entity);
                 if (mesh)

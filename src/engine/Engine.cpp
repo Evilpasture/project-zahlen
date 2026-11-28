@@ -197,9 +197,6 @@ auto Engine::HandleDeviceLost(const bool drainDevice) noexcept -> std::expected<
         skeleton.skinnedScratch     = BufferID::Invalid;
         skeleton.scratchVertexCount = 0;
     }
-    for (auto& owned: reg.GetRawArray<Components::OwnedMeshComponent>()) {
-        owned.mesh = {}; // the old context will reclaim its pool; never destroy these on the new device
-    }
 
     if (auto rebuilt = _impl->kernel->HandleDeviceLost(drainDevice); !rebuilt) {
         return std::unexpected(rebuilt.error());
@@ -221,7 +218,7 @@ auto Engine::HandleDeviceLost(const bool drainDevice) noexcept -> std::expected<
             .visibility    = _impl->world->VisibilityForServices(),
         });
     }
-    PrefabFactory::RebuildVulkanResources(Render(), _impl->world->GetRegistry());
+    PrefabFactory::RebuildVulkanResources(Render(), Assets());
 
     for (const auto& callback: _impl->deviceLostCallbacks) {
         if (callback) {
@@ -427,34 +424,34 @@ void Engine::Present(Engine& engine, float dt, FrameContext& ctx) {
 
 namespace PrefabFactory {
 auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
-    return CreateBoxInternal(engine.Render(), engine.Registry(), engine.Physics(), halfExtents, params);
+    return CreateBoxInternal(engine.Render(), engine.Assets(), engine.Registry(), engine.Physics(), halfExtents, params);
 }
 auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
-    return CreateSphereInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, params);
+    return CreateSphereInternal(engine.Render(), engine.Assets(), engine.Registry(), engine.Physics(), radius, params);
 }
 auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
-    return CreateCylinderInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params);
+    return CreateCylinderInternal(engine.Render(), engine.Assets(), engine.Registry(), engine.Physics(), radius, height, params);
 }
 auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
-    return CreateConeInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params);
+    return CreateConeInternal(engine.Render(), engine.Assets(), engine.Registry(), engine.Physics(), radius, height, params);
 }
 auto CreatePlane(Engine& engine, float extent, ZHLN::FVec4 color, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
-    return CreatePlaneInternal(engine.Render(), engine.Registry(), engine.Physics(), extent, color, params);
+    return CreatePlaneInternal(engine.Render(), engine.Assets(), engine.Registry(), engine.Physics(), extent, color, params);
 }
 auto CreateBoxConfigured(Engine& engine, FVec3 halfExtents, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
-    return CreateBoxInternal(engine.Render(), engine.Registry(), engine.Physics(), halfExtents, params, buildBLAS);
+    return CreateBoxInternal(engine.Render(), engine.Assets(), engine.Registry(), engine.Physics(), halfExtents, params, buildBLAS);
 }
 auto CreatePlaneConfigured(Engine& engine, float extent, FVec4 color, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
-    return CreatePlaneInternal(engine.Render(), engine.Registry(), engine.Physics(), extent, color, params, buildBLAS);
+    return CreatePlaneInternal(engine.Render(), engine.Assets(), engine.Registry(), engine.Physics(), extent, color, params, buildBLAS);
 }
 auto CreateSphereConfigured(Engine& engine, float radius, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
-    return CreateSphereInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, params, buildBLAS);
+    return CreateSphereInternal(engine.Render(), engine.Assets(), engine.Registry(), engine.Physics(), radius, params, buildBLAS);
 }
 auto CreateCylinderConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
-    return CreateCylinderInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params, buildBLAS);
+    return CreateCylinderInternal(engine.Render(), engine.Assets(), engine.Registry(), engine.Physics(), radius, height, params, buildBLAS);
 }
 auto CreateConeConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
-    return CreateConeInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params, buildBLAS);
+    return CreateConeInternal(engine.Render(), engine.Assets(), engine.Registry(), engine.Physics(), radius, height, params, buildBLAS);
 }
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&> {
     // A lookup, not a load: an importer has already cached the prefab by the

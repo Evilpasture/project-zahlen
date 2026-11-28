@@ -7,13 +7,12 @@
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Core/PageVector.hpp>
 #include <Zahlen/Core/Pages.hpp>
-#include <atomic>
+#include <Zahlen/Core/Reflection/TypeKey.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Sync.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/SharedMutex.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <ecs/ECS.hpp>
 #include <algorithm>
 #include <atomic>
 #include <concepts>
@@ -341,7 +340,7 @@ class EventBus {
     };
 
     struct ChannelNode {
-        uint32_t                  hash          = 0;
+        uint64_t                  typeKey       = 0;
         std::atomic<ChannelNode*> next {nullptr};
         void (*destroyFn)(ChannelNode*) noexcept     = nullptr;
         void (*clearEventsFn)(ChannelNode*) noexcept = nullptr;
@@ -353,8 +352,8 @@ class EventBus {
         PageVector<T> scratch;
         bool          draining = false;
 
-        explicit TypedChannel(uint32_t typeHash, std::pmr::memory_resource* pages) noexcept: primary(pages), scratch(pages) {
-            hash          = typeHash;
+        explicit TypedChannel(uint64_t key, std::pmr::memory_resource* pages) noexcept: primary(pages), scratch(pages) {
+            typeKey       = key;
             destroyFn     = &DestroySelf;
             clearEventsFn = &ClearSelf;
         }
@@ -538,10 +537,10 @@ class EventBus {
 
     template <typename T>
     [[nodiscard]] auto FindChannel() const noexcept -> const TypedChannel<T>* {
-        const uint32_t target = GetTypeHash<T>();
+        constexpr uint64_t target = Reflect::TypeKey<T>();
         for (const ChannelNode* node = _head.load(std::memory_order::acquire); node != nullptr;
              node                    = node->next.load(std::memory_order::acquire)) {
-            if (node->hash == target) {
+            if (node->typeKey == target) {
                 return static_cast<const TypedChannel<T>*>(node);
             }
         }
@@ -563,7 +562,7 @@ class EventBus {
                 return existing;
             }
             void* memory  = AllocateInSlabLocked(sizeof(TypedChannel<T>), alignof(TypedChannel<T>));
-            auto* channel = std::construct_at(static_cast<TypedChannel<T>*>(memory), GetTypeHash<T>(), _pages);
+            auto* channel = std::construct_at(static_cast<TypedChannel<T>*>(memory), Reflect::TypeKey<T>(), _pages);
             channel->next.store(_head.load(std::memory_order::relaxed), std::memory_order::relaxed);
             _head.store(channel, std::memory_order::release);
             _channelCount.fetch_add(1, std::memory_order::release);
@@ -581,7 +580,7 @@ class EventBus {
 };
 
 // Read-only view of pending events of type `T` for ECS systems (`SystemGraph`).
-// Multiple systems declaring `EventReader<T>` share `Access::Read` on `EventToken<T>`
+// Multiple systems declaring `EventReader<T>` share `Access::Read` in `AccessDomain::Event`
 // and run in parallel; they are automatically ordered against `EventWriter<T>`.
 template <typename T>
 class EventReader {
@@ -629,7 +628,7 @@ class EventReader {
 };
 
 // Checked writer/consumer handle for events of type `T` in ECS systems (`SystemGraph`).
-// Declares `Access::Write` on `EventToken<T>` — serializing against other writers or readers
+// Declares `Access::Write` in `AccessDomain::Event` — serializing against other writers or readers
 // of `T`, while running in parallel with writers/readers of unrelated event types `U != T`.
 // A checked logical handle, not a pointer into the bus's page slab. Copying a
 // writer keeps only the small lifetime binding alive; Clear() closes that

@@ -39,6 +39,7 @@
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/Core/Reflection/CanonicalName.hpp>
+#include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Core/Reflection/LayoutHash.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <ecs/ECS.hpp>
@@ -137,117 +138,29 @@ template <typename T> auto ReadNode(const ChainInNode* chain) noexcept -> Result
 // The registry keys dynamic families by name and mints the family id on first
 // use. Resolving per call keeps the boundary stateless; the registry's own
 // lookup is the cache.
-[[nodiscard]] auto FamilyFor(ECS::Registry& registry, StringView typeName, size_t size, size_t alignment) noexcept
-    -> uint32_t {
-    return registry.RegisterComponentDynamic(std::string_view(typeName), size, alignment);
-}
-
-// The engine components a COM consumer may attach to typed storage.
-//
-// Membership is a public ABI commitment: a published component's layout is
-// frozen for every consumer built against it, which is why this list is
-// written out by hand rather than deduced from "everything that happens to be
-// trivially copyable".
-//
-// Components satisfying SceneResources::OwnsExternalResource<T> release their
-// owned Jolt bodies, ragdolls, audio voices, or GPU mesh/skin buffers before
-// overwrite or detach so COM consumers cannot leak external handles.
-template <typename T>
-[[nodiscard]] consteval auto Publish() -> PublishedComponent {
-    static_assert(std::is_trivially_copyable_v<T>,
-                  "a published component must be trivially copyable: the boundary copies it as bytes");
-    static_assert(std::is_standard_layout_v<T>,
-                  "a published component must be standard layout: the consumer models it from the same offsets");
-    return PublishedComponent {
-        .name       = Reflect::CanonicalTypeName<T>(),
-        .size       = static_cast<uint32_t>(sizeof(T)),
-        .alignment  = static_cast<uint32_t>(alignof(T)),
-        .layoutHash = Reflect::LayoutHash<T>(),
-        .familyID   = +[]() noexcept -> uint32_t { return ECS::ComponentFamily::GetTypeID<T>(); },
-        .ensure     = +[](ZHLN::Engine& engine, ECS::Registry& registry, Entity entity) noexcept -> void* {
-            const uint32_t id = ECS::ComponentFamily::GetTypeID<T>();
-            if (void* existing = registry.GetRawByFamily(entity, id)) {
-                if constexpr (SceneResources::OwnsExternalResource<T>) {
-                    SceneResources::Release(engine, *static_cast<T*>(existing));
-                    *static_cast<T*>(existing) = T {};
-                }
-                return existing;
-            }
-            // Add() panics on a dead entity rather than returning; the caller
-            // has already refused those, and this keeps that contract local.
-            if (!registry.IsAlive(entity))
-                return nullptr;
-            return &registry.Add<T>(entity);
-        },
-        .remove = +[](ZHLN::Engine& engine, ECS::Registry& registry, Entity entity) noexcept -> bool {
-            if constexpr (SceneResources::OwnsExternalResource<T>) {
-                return SceneResources::Detach<T>(engine, registry, entity);
-            } else {
-                const uint32_t id = ECS::ComponentFamily::GetTypeID<T>();
-                if (registry.GetRawByFamily(entity, id) == nullptr)
-                    return false;
-                registry.Remove<T>(entity);
-                return true;
-            }
-        },
-        .fetch = +[](const ECS::Registry& registry, Entity entity) noexcept -> void* {
-            return registry.GetRawByFamily(entity, ECS::ComponentFamily::GetTypeID<T>());
-        },
-    };
-}
-
-constexpr std::array kPublishedComponents {
-    Publish<Components::PendingDestroy>(),
-    Publish<Components::TransformComponent>(),
-    Publish<Components::WorldTransformComponent>(),
-    Publish<Components::HierarchyComponent>(),
-    Publish<Components::NameComponent>(),
-    Publish<Components::PrefabInstanceComponent>(),
-    Publish<Components::SceneSourceComponent>(),
-    Publish<Components::PBRComponent>(),
-    Publish<Components::AmbientCubeComponent>(),
-    Publish<Components::MeshComponent>(),
-    Publish<Components::OwnedMeshComponent>(),
-    Publish<Components::SkeletalMeshComponent>(),
-    Publish<Components::MorphTargetComponent>(),
-    Publish<Components::LODComponent>(),
-    Publish<Components::CameraComponent>(),
-    Publish<Components::MainCameraTagComponent>(),
-    Publish<Components::LightComponent>(),
-    Publish<Components::SceneLightTagComponent>(),
-    Publish<Components::EnvironmentSunTagComponent>(),
-    Publish<Components::SunTagComponent>(),
-    Publish<Components::EnvironmentMapComponent>(),
-    Publish<Components::DecalComponent>(),
-    Publish<Components::ParticleEmitterComponent>(),
-    Publish<Components::MeshParticleEmitterComponent>(),
-    Publish<Components::VolumetricFogComponent>(),
-    Publish<Components::VolumetricVolumeComponent>(),
-    Publish<Components::CharacterMotorComponent>(),
-    Publish<Components::CharacterMotorStateComponent>(),
-    Publish<Components::StaticBodyComponent>(),
-    Publish<Components::KinematicBodyComponent>(),
-    Publish<Components::DynamicBodyComponent>(),
-    Publish<Components::CharacterBodyComponent>(),
-    Publish<Components::ImpulseCommand>(),
-    Publish<Components::RagdollComponent>(),
-    Publish<Components::RagdollHitReactionCommand>(),
-    Publish<Components::RagdollImpulseCommand>(),
-    Publish<Components::AudioListenerComponent>(),
-    Publish<Components::AudioSourceComponent>(),
-    Publish<Components::PlayerTagComponent>(),
-    Publish<Components::PlayerSeatComponent>(),
-};
-
-[[nodiscard]] auto FindPublished(ZHLN::Engine& engine, StringView typeName) noexcept -> const PublishedComponent* {
-    const std::string_view wanted(typeName);
-    for (const auto& entry : kPublishedComponents) {
-        if (entry.name == wanted) return &entry;
+[[nodiscard]] constexpr auto SafeView(StringView sv) noexcept -> std::string_view {
+    if (sv.data == nullptr || sv.size == 0) {
+        return {};
     }
-    return nullptr;
+    return {sv.data, sv.size};
 }
 
-constexpr uint32_t kInvalidFamily = 0xFFFFFFFFu;
+// Publishes every nested component in ZHLN::Components on `registry` lazily
+// (zero SparseSet allocations until first attach) and binds SceneResources
+// retirement hooks only for the external-resource-owning components.
+void PublishEngineComponents(ZHLN::Engine& engine) {
+    ECS::Registry& registry = engine.Registry();
+    Reflect::ForEachNestedType<Components>([&]<typename T>() { PublishComponent<T>(registry); });
+    BindRetireHooks<
+        Components::StaticBodyComponent,
+        Components::KinematicBodyComponent,
+        Components::DynamicBodyComponent,
+        Components::CharacterBodyComponent,
+        Components::RagdollComponent,
+        Components::AudioSourceComponent,
+        Components::SkeletalMeshComponent,
+        Components::MorphTargetComponent>(registry, engine);
+}
 
 
 // Parses one shape node of a creation chain into `built`, applying the
@@ -411,7 +324,11 @@ class Engine final:
     // destroyed after it) is what keeps the hub alive for the engine's whole
     // life -- and what makes IEngine::Logger()/Errors() answerable.
     Engine(std::unique_ptr<ZHLN::Engine> engine, Ref<ILogger> logger, Ref<IErrorRegistry> errors) noexcept
-        : m_logger(std::move(logger)), m_errors(std::move(errors)), m_engine(std::move(engine)) {}
+        : m_logger(std::move(logger)), m_errors(std::move(errors)), m_engine(std::move(engine)) {
+        if (m_engine != nullptr) {
+            PublishEngineComponents(*m_engine);
+        }
+    }
 
     void TraceDiagnostics() const noexcept override;
 
@@ -1273,70 +1190,26 @@ class Engine final:
         return m_engine->Registry().IsAlive(entity);
     }
 
-    [[nodiscard]] void* AttachRaw(Entity entity, StringView typeName, uint32_t size, uint32_t alignment) noexcept override {
-        auto&          registry = m_engine->Registry();
-        const uint32_t family   = FamilyFor(registry, typeName, size, alignment);
-        if (family == kInvalidFamily) return nullptr;
-        return registry.AddDynamic(entity, family);
+    [[nodiscard]] bool IsEngineComponent(StringView typeName) const noexcept override {
+        return m_engine->Registry().IsPublishedComponent(SafeView(typeName));
+    }
+
+    [[nodiscard]] void* AttachRaw(Entity entity, StringView typeName, uint32_t size, uint32_t alignment,
+                                  uint64_t layoutHash) noexcept override {
+        return m_engine->Registry().AttachRaw(entity, SafeView(typeName), size, alignment, layoutHash);
     }
 
     bool DetachRaw(Entity entity, StringView typeName) noexcept override {
-        auto&          registry = m_engine->Registry();
-        const uint32_t family   = ECS::Registry::GetFamilyIDFromName(std::string_view(typeName));
-        if (family == kInvalidFamily) return false;
-        return registry.RemoveDynamic(entity, family);
+        return m_engine->Registry().DetachRaw(entity, SafeView(typeName));
     }
 
     [[nodiscard]] void* GetRaw(Entity entity, StringView typeName) const noexcept override {
-        const uint32_t family = ECS::Registry::GetFamilyIDFromName(std::string_view(typeName));
-        if (family == kInvalidFamily) return nullptr;
-        return m_engine->Registry().GetDynamicRaw(entity, family);
-    }
-
-    [[nodiscard]] bool IsEngineComponent(StringView typeName) const noexcept override {
-        return FindPublished(*m_engine, typeName) != nullptr;
-    }
-
-    [[nodiscard]] void* AttachEngineRaw(Entity entity, StringView typeName, uint32_t size, uint32_t alignment,
-                                        uint64_t layoutHash) noexcept override {
-        const PublishedComponent* published = FindPublished(*m_engine, typeName);
-        if (published == nullptr) return nullptr;
-        // All three must agree. The hash subsumes the other two, but checking
-        // them separately makes a stale consumer fail for a legible reason.
-        if (published->size != size || published->alignment != alignment || published->layoutHash != layoutHash) {
-            return nullptr;
-        }
-        auto& registry = m_engine->Registry();
-        if (!registry.IsAlive(entity)) return nullptr;
-        return published->ensure(*m_engine, registry, entity);
-    }
-
-    bool DetachEngineRaw(Entity entity, StringView typeName) noexcept override {
-        const PublishedComponent* published = FindPublished(*m_engine, typeName);
-        if (published == nullptr) return false;
-        auto& registry = m_engine->Registry();
-        if (!registry.IsAlive(entity)) return false;
-        return published->remove(*m_engine, registry, entity);
-    }
-
-    [[nodiscard]] void* GetEngineRaw(Entity entity, StringView typeName) const noexcept override {
-        const PublishedComponent* published = FindPublished(*m_engine, typeName);
-        if (published == nullptr) return nullptr;
-        return published->fetch(m_engine->Registry(), entity);
+        return m_engine->Registry().GetRaw(entity, SafeView(typeName));
     }
 
     [[nodiscard]] uint32_t EntitiesWithRaw(StringView typeName, Entity* outEntities,
                                            uint32_t capacity) const noexcept override {
-        const auto& registry = m_engine->Registry();
-        uint32_t    family   = kInvalidFamily;
-        if (const PublishedComponent* published = FindPublished(*m_engine, typeName)) {
-            family = published->familyID();
-        } else {
-            family = ECS::Registry::GetFamilyIDFromName(std::string_view(typeName));
-        }
-        if (family == kInvalidFamily) return 0;
-
-        const std::span<const Entity> matching = registry.GetEntitiesByFamilyID(family);
+        const std::span<const Entity> matching = m_engine->Registry().EntitiesWithRaw(SafeView(typeName));
         const auto                    total    = static_cast<uint32_t>(matching.size());
         if (outEntities != nullptr && capacity > 0 && total > 0) {
             std::copy_n(matching.begin(), std::min(total, capacity), outEntities);

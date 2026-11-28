@@ -6,16 +6,17 @@
 // Zahlen/COM/IEntities.hpp
 //
 // The ECS seam. A virtual function cannot be a template, so the vtable carries
-// only type-erased operations keyed on a component's qualified name, and the
-// typed API is rebuilt from inline templates that compile in the consumer's
-// own translation unit. Nothing about the caller's component type needs to be
-// known inside the library.
+// one unified set of type-erased operations keyed on a component's canonical
+// qualified name (whose 64-bit FNV-1a hash matches Reflect::TypeKey<T>()), and
+// the typed API is rebuilt from inline templates that compile in the consumer's
+// own translation unit. Nothing about a consumer-defined component type needs
+// to be known inside the library.
 //
-// The storage behind consumer components is the registry's dynamic-component
-// path, which holds raw bytes and runs no destructor. Published engine
-// components route to the engine's own typed SparseSets after verifying size,
-// alignment and recursive leaf LayoutHash, and honour SceneResources ownership
-// on replacement and detach.
+// Published engine components route to the engine's own typed SparseSets after
+// verifying size, alignment, and non-zero recursive leaf LayoutHash, and run
+// SceneResources retirement hooks on replacement and detach. Unpublished native
+// engine components and short-name aliases are refused. Consumer-defined types
+// auto-register dynamic raw byte storage on first AttachRaw.
 
 #include <Zahlen/COM/Types.hpp>
 #include <Zahlen/Core/COM/Collect.hpp>
@@ -38,28 +39,23 @@ struct IEntities : IObject {
     virtual void                 Despawn(Entity entity) noexcept = 0;
     [[nodiscard]] virtual bool   IsAlive(Entity entity) const noexcept = 0;
 
-    // `typeName` identifies the component family. The library hashes and
-    // registers it on first use, so a consumer-defined component needs no
-    // registration call and no shared header. Returns nullptr if the entity is
-    // dead, or if the name is already taken by a C++ component family -- the
-    // registry refuses to reinterpret typed storage as raw bytes.
-    [[nodiscard]] virtual void* AttachRaw(Entity entity, StringView typeName, uint32_t size, uint32_t alignment) noexcept = 0;
+    // Reports whether `typeName` names a published engine component in typed
+    // storage (false for unpublished native engine types and consumer dynamic
+    // components).
+    [[nodiscard]] virtual bool IsEngineComponent(StringView typeName) const noexcept = 0;
+
+    // Unified raw component seam keyed on canonical `typeName` (hashed with
+    // Hash64 to match Reflect::TypeKey<T>()).
+    // - Published engine components require exact size, alignment, and non-zero
+    //   layoutHash, route to typed SparseSets, and run retirement hooks before
+    //   overwrite or detach.
+    // - Unpublished native engine components and short-name aliases are refused.
+    // - Consumer-defined components auto-register dynamic byte storage on first
+    //   attach and validate size, alignment, and layoutHash on later attaches.
+    [[nodiscard]] virtual void* AttachRaw(Entity entity, StringView typeName, uint32_t size, uint32_t alignment,
+                                          uint64_t layoutHash) noexcept = 0;
     virtual bool                DetachRaw(Entity entity, StringView typeName) noexcept = 0;
     [[nodiscard]] virtual void* GetRaw(Entity entity, StringView typeName) const noexcept = 0;
-
-    // The engine's own components live in typed storage that its systems
-    // iterate; the dynamic path above deliberately cannot reach them. These
-    // three do, for the families the engine has chosen to publish.
-    //
-    // `layoutHash` is the caller's own fingerprint of the component. A name
-    // the engine publishes is only served when size, alignment and hash all
-    // agree with the definition the library was built against -- otherwise
-    // the call is refused rather than served through a mismatched view.
-    [[nodiscard]] virtual bool  IsEngineComponent(StringView typeName) const noexcept = 0;
-    [[nodiscard]] virtual void* AttachEngineRaw(Entity entity, StringView typeName, uint32_t size, uint32_t alignment,
-                                                uint64_t layoutHash) noexcept = 0;
-    virtual bool                DetachEngineRaw(Entity entity, StringView typeName) noexcept = 0;
-    [[nodiscard]] virtual void* GetEngineRaw(Entity entity, StringView typeName) const noexcept = 0;
 
     // Writes up to `capacity` entities owning `typeName` (published engine
     // component or dynamic consumer component) and returns the total count in
@@ -71,34 +67,18 @@ struct IEntities : IObject {
     // templates, and these never cross the boundary as symbols.
     template <Component T>
     auto Attach(Entity entity, const T& component) noexcept -> T* {
-        if (IsEngineComponent(ComponentName<T>())) {
-            // Already a constructed T in typed storage; assign, do not
-            // placement-new over storage the registry is tracking. No
-            // fallback on refusal -- a mismatch must surface, not degrade
-            // into a parallel family nothing reads.
-            void* storage = AttachEngineRaw(entity, ComponentName<T>(), sizeof(T), alignof(T), Reflect::LayoutHash<T>());
-            if (storage == nullptr) return nullptr;
-            *static_cast<T*>(storage) = component;
-            return static_cast<T*>(storage);
-        }
-        void* storage = AttachRaw(entity, ComponentName<T>(), sizeof(T), alignof(T));
+        void* storage = AttachRaw(entity, ComponentName<T>(), sizeof(T), alignof(T), Reflect::LayoutHash<T>());
         if (storage == nullptr) return nullptr;
         return new (storage) T(component);
     }
 
     template <Component T>
     [[nodiscard]] auto Get(Entity entity) const noexcept -> T* {
-        if (IsEngineComponent(ComponentName<T>())) {
-            return static_cast<T*>(GetEngineRaw(entity, ComponentName<T>()));
-        }
         return static_cast<T*>(GetRaw(entity, ComponentName<T>()));
     }
 
     template <Component T>
     auto Detach(Entity entity) noexcept -> bool {
-        if (IsEngineComponent(ComponentName<T>())) {
-            return DetachEngineRaw(entity, ComponentName<T>());
-        }
         return DetachRaw(entity, ComponentName<T>());
     }
 

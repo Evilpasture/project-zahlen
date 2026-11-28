@@ -170,8 +170,14 @@ struct TextureTransformsTestSuite {
             constexpr std::array<std::string_view, 3> materialKeys {"uv_transform_0_mat", "uv_transform_1_mat", "uv_transform_sample_mat"};
             std::array<ZHLN::MaterialID, 3> registeredMaterials {};
             size_t registeredCount = 0;
+            std::array<std::pair<ZHLN::AssetID, ZHLN::Mesh>, 3> registeredMeshes {};
+            size_t meshCount = 0;
             ZHLN::defer _([&] {
-                engine->ClearScene(); // releases the three scene-owned mesh buffers
+                engine->ClearScene();
+                for (size_t i = 0; i < meshCount; ++i) {
+                    rc.UnregisterMesh(registeredMeshes[i].first);
+                    rc.DestroyMesh(registeredMeshes[i].second);
+                }
                 for (size_t i = 0; i < registeredCount; ++i) {
                     rc.UnregisterMaterial(registeredMaterials[i]);
                 }
@@ -201,14 +207,14 @@ struct TextureTransformsTestSuite {
                 }
                 const auto meshID = ZHLN::HashAssetID(meshKeys[column]);
                 rc.RegisterMesh(meshID, mesh);
+                registeredMeshes[meshCount++] = {meshID, mesh};
                 const ZHLN::FVec3 offset{kPanelX[column], 0.0f, 0.0f};
                 const auto world = ZHLN::CreateTranslation(offset);
-                const ZHLN::Entity e = reg.Spawn(
+                (void)reg.Spawn(
                     ZHLN::Components::TransformComponent {.position = offset},
                     ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
                     ZHLN::Components::MeshComponent {.meshAsset = meshID, .materialAsset = materialID, .cullRadius = 1.0f}
                 );
-                engine->Entities()->Attach<ZHLN::Components::OwnedMeshComponent>(e, {.meshAsset = meshID, .mesh = mesh});
             }
 
             ZHLN::Test::Headless::TickFrames(*engine, 5);

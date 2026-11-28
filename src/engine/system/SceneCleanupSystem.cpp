@@ -92,7 +92,6 @@ void ReleaseOwnedResources(Engine& engine, ECS::Registry& registry, bool all) {
     // cleanup into a graph or playing an unrelated command buffer.
     ReleasePhysics(engine, PhysicsCleanupQuery {registry}, all);
     ReleaseSelected<Components::AudioSourceComponent>(engine, ECS::Query<Components::AudioSourceComponent&, const Components::PendingDestroy> {registry}, all);
-    ReleaseSelected<Components::OwnedMeshComponent>(engine, ECS::Query<Components::OwnedMeshComponent&, const Components::PendingDestroy> {registry}, all);
     ReleaseSelected<Components::SkeletalMeshComponent>(engine, ECS::Query<Components::SkeletalMeshComponent&, const Components::PendingDestroy> {registry}, all);
     ReleaseSelected<Components::MorphTargetComponent>(engine, ECS::Query<Components::MorphTargetComponent&, const Components::PendingDestroy> {registry}, all);
     engine.RunSceneCleanupPasses(all);

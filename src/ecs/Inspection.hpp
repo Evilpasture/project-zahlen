@@ -3,6 +3,7 @@
 #pragma once
 
 #include <ecs/ECS.hpp>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -18,21 +19,30 @@ class Inspection {
   public:
     explicit Inspection(Registry& registry) noexcept: _registry(&registry) {}
 
-    [[nodiscard]] auto IsAlive(Entity entity) const noexcept -> bool { return _registry->IsAlive(entity); }
+    [[nodiscard]] auto IsAlive(Entity entity) const noexcept -> bool {
+        return _registry->IsAlive(entity);
+    }
     [[nodiscard]] auto IsRegistered(std::string_view name) const noexcept -> bool {
-        return Registry::GetFamilyIDFromName(name) != 0xFFFFFFFF;
+        return _registry->HasFamily(name);
     }
     [[nodiscard]] auto Component(Entity entity, std::string_view name) const noexcept -> void* {
-        const auto family = Registry::GetFamilyIDFromName(name);
-        return family == 0xFFFFFFFF ? nullptr : _registry->GetRawByFamily(entity, family);
+        return _registry->GetRawByName(entity, name);
     }
-    void Dump(Entity entity, std::string& out) const { _registry->DebugDumpEntity(entity, out); }
+    void Dump(Entity entity, std::string& out) const {
+        _registry->DebugDumpEntity(entity, out);
+    }
     template <typename T>
-    void Register(std::string_view name) const { _registry->RegisterComponent<T>(name); }
+    void Register(std::string_view name) const {
+        _registry->RegisterComponent<T>(name);
+    }
     template <typename T>
-    [[nodiscard]] auto EntitiesWith() const noexcept -> std::span<const Entity> { return _registry->GetEntitiesWith<T>(); }
+    [[nodiscard]] auto EntitiesWith() const noexcept -> std::span<const Entity> {
+        return _registry->GetEntitiesWith<T>();
+    }
     template <typename T>
-    [[nodiscard]] auto Read(Entity entity) const noexcept -> ZHLN::Optional<const T&> { return std::as_const(*_registry).Get<T>(entity); }
+    [[nodiscard]] auto Read(Entity entity) const noexcept -> ZHLN::Optional<const T&> {
+        return std::as_const(*_registry).Get<T>(entity);
+    }
 
   private:
     Registry* _registry;

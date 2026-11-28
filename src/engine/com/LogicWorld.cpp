@@ -3,10 +3,12 @@
 #include <engine/Hierarchy.hpp>
 #include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
+#include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/ECS/ComponentPolicy.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include "LogBridge.hpp"
 #include <ecs/ECS.hpp>
+#include <engine/PublishedComponents.hpp>
 #include <engine/SceneResources.hpp>
 #include <engine/World.hpp>
 #include <physics/Physics.hpp>
@@ -16,93 +18,43 @@
 #include <new>
 #include <optional>
 #include <string_view>
-#include <unordered_set>
 #include <utility>
 namespace ZHLN::COM {
 static_assert(AuditInterfaceABI<ILogicWorld>());
 namespace {
-struct LogicComponent {
-    std::string_view name;
-    uint32_t         size, alignment;
-    uint64_t         hash;
-    uint32_t (*family)() noexcept;
-    void* (*ensure)(ECS::Registry&, Entity) noexcept;
-    void (*remove)(ECS::Registry&, Entity) noexcept;
-    void (*releasePhysics)(PhysicsContext&, ECS::Registry&, Entity) noexcept;
-};
-template <class T>
-consteval auto ReleasePhysicsHook() -> void (*)(PhysicsContext&, ECS::Registry&, Entity) noexcept {
-    if constexpr (SceneResources::IsPhysicsBodyComponent<T> || std::is_same_v<T, Components::RagdollComponent>) {
-        return +[](PhysicsContext& sim, ECS::Registry& r, Entity e) noexcept {
-            if (auto p = r.Get<T>(e)) {
-                SceneResources::Release(sim, *p);
-                *p = T {};
-            }
-        };
-    } else {
-        return nullptr;
+
+[[nodiscard]] constexpr auto SafeView(StringView sv) noexcept -> std::string_view {
+    if (sv.data == nullptr || sv.size == 0) {
+        return {};
     }
+    return {sv.data, sv.size};
 }
 
-template <class T>
-consteval auto PublishLogic() -> LogicComponent {
-    return {
-        Reflect::CanonicalTypeName<T>(),
-        sizeof(T),
-        alignof(T),
-        Reflect::LayoutHash<T>(),
-        +[]() noexcept { return ECS::ComponentFamily::GetTypeID<T>(); },
-        +[](ECS::Registry& r, Entity e) noexcept -> void* {
-            if (auto p = r.Get<T>(e))
-                return &*p;
-            return &r.Add<T>(e);
-        },
-        +[](ECS::Registry& r, Entity e) noexcept { r.Remove<T>(e); },
-        ReleasePhysicsHook<T>()
-    };
-}
-constexpr std::array kLogicComponents {
-    PublishLogic<Components::PendingDestroy>(),
-    PublishLogic<Components::TransformComponent>(),
-    PublishLogic<Components::WorldTransformComponent>(),
-    PublishLogic<Components::HierarchyComponent>(),
-    PublishLogic<Components::NameComponent>(),
-    PublishLogic<Components::PrefabInstanceComponent>(),
-    PublishLogic<Components::SceneSourceComponent>(),
-    PublishLogic<Components::PBRComponent>(),
-    PublishLogic<Components::AmbientCubeComponent>(),
-    PublishLogic<Components::MeshComponent>(),
-    PublishLogic<Components::SkeletalMeshComponent>(),
-    PublishLogic<Components::MorphTargetComponent>(),
-    PublishLogic<Components::LODComponent>(),
-    PublishLogic<Components::CameraComponent>(),
-    PublishLogic<Components::MainCameraTagComponent>(),
-    PublishLogic<Components::LightComponent>(),
-    PublishLogic<Components::SceneLightTagComponent>(),
-    PublishLogic<Components::SunTagComponent>(),
-    PublishLogic<Components::CharacterMotorComponent>(),
-    PublishLogic<Components::CharacterMotorStateComponent>(),
-    PublishLogic<Components::StaticBodyComponent>(),
-    PublishLogic<Components::KinematicBodyComponent>(),
-    PublishLogic<Components::DynamicBodyComponent>(),
-    PublishLogic<Components::CharacterBodyComponent>(),
-    PublishLogic<Components::ImpulseCommand>(),
-    PublishLogic<Components::RagdollComponent>(),
-    PublishLogic<Components::RagdollHitReactionCommand>(),
-    PublishLogic<Components::RagdollImpulseCommand>(),
-    PublishLogic<Components::AudioListenerComponent>(),
-    PublishLogic<Components::AudioSourceComponent>(),
-    PublishLogic<Components::PlayerTagComponent>(),
-    PublishLogic<Components::PlayerSeatComponent>(),
-};
-auto FindLogic(StringView name) noexcept -> const LogicComponent* {
-    if (!name.data && name.size)
-        return nullptr;
-    auto text = name.size ? std::string_view(name) : std::string_view {};
-    for (const auto& c: kLogicComponents)
-        if (c.name == text)
-            return &c;
-    return nullptr;
+template <typename T>
+inline constexpr bool kRenderOnlyComponent =
+    std::is_same_v<T, Components::EnvironmentSunTagComponent> ||
+    std::is_same_v<T, Components::EnvironmentMapComponent> ||
+    std::is_same_v<T, Components::DecalComponent> ||
+    std::is_same_v<T, Components::CSGCutterComponent> ||
+    std::is_same_v<T, Components::ParticleEmitterComponent> ||
+    std::is_same_v<T, Components::MeshParticleEmitterComponent> ||
+    std::is_same_v<T, Components::VolumetricFogComponent> ||
+    std::is_same_v<T, Components::VolumetricVolumeComponent>;
+
+void PublishLogicComponents(PhysicsContext& physics, ECS::Registry& registry) {
+    Reflect::ForEachNestedType<Components>([&]<typename T>() {
+        if constexpr (kRenderOnlyComponent<T>) {
+            registry.ReserveTypedSlot<T>();
+        } else {
+            PublishComponent<T>(registry);
+        }
+    });
+    BindRetireHooks<
+        Components::StaticBodyComponent,
+        Components::KinematicBodyComponent,
+        Components::DynamicBodyComponent,
+        Components::CharacterBodyComponent,
+        Components::RagdollComponent>(registry, physics);
 }
 
 // Parses one shape node of a creation chain into `built`, applying the
@@ -259,11 +211,7 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
             ZHLN::SetLogSink(ZHLN::LogBridge::ToSink(m_logger.Get()));
             m_installedSink = true;
         }
-        Reflect::ForEachNestedType<Components>([&]<class T>() {
-            constexpr auto name = Reflect::CanonicalTypeName<T>();
-            m_engineNames.insert(name);
-            ECS::Registry::InternAndMapNameToFamilyID(name, ECS::ComponentFamily::GetTypeID<T>());
-        });
+        PublishLogicComponents(Sim(), Registry());
     }
     [[nodiscard]] ILogger* Logger() noexcept override {
         return m_logger.Get();
@@ -303,14 +251,14 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
     void Clear() noexcept override {
         auto&                        r = Registry();
         std::vector<Physics::BodyID> bodies;
-        for (const auto& p: r.GetRawArray<Components::StaticBodyComponent>())
-            bodies.push_back(p.bodyID);
-        for (const auto& p: r.GetRawArray<Components::KinematicBodyComponent>())
-            bodies.push_back(p.bodyID);
-        for (const auto& p: r.GetRawArray<Components::DynamicBodyComponent>())
-            bodies.push_back(p.bodyID);
-        for (const auto& p: r.GetRawArray<Components::CharacterBodyComponent>())
-            bodies.push_back(p.bodyID);
+        for (auto& p: r.GetRawArray<Components::StaticBodyComponent>())
+            bodies.push_back(std::exchange(p.bodyID, Physics::StaticBodyID::Null()));
+        for (auto& p: r.GetRawArray<Components::KinematicBodyComponent>())
+            bodies.push_back(std::exchange(p.bodyID, Physics::KinematicBodyID::Null()));
+        for (auto& p: r.GetRawArray<Components::DynamicBodyComponent>())
+            bodies.push_back(std::exchange(p.bodyID, Physics::DynamicBodyID::Null()));
+        for (auto& p: r.GetRawArray<Components::CharacterBodyComponent>())
+            bodies.push_back(std::exchange(p.bodyID, Physics::CharacterID::Null()));
         if (!bodies.empty()) {
             Sim().DestroyBodies(bodies);
         }
@@ -326,61 +274,23 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
     bool IsAlive(Entity e) const noexcept override {
         return Registry().IsAlive(e);
     }
-    void* AttachRaw(Entity e, StringView name, uint32_t size, uint32_t alignment) noexcept override {
-        if (!name.data || !name.size || !size || !alignment || (alignment & (alignment - 1)) != 0 || !Registry().IsAlive(e) ||
-            m_engineNames.contains(std::string_view(name)))
-            return nullptr;
-        auto family = Registry().RegisterComponentDynamic(std::string_view(name), size, alignment);
-        if (family == UINT32_MAX)
-            return nullptr;
-        m_dynamicFamilies.insert(family);
-        return Registry().AddDynamic(e, family);
+    bool IsEngineComponent(StringView name) const noexcept override {
+        return Registry().IsPublishedComponent(SafeView(name));
+    }
+    void* AttachRaw(Entity e, StringView name, uint32_t size, uint32_t alignment, uint64_t layoutHash) noexcept override {
+        return Registry().AttachRaw(e, SafeView(name), size, alignment, layoutHash);
     }
     bool DetachRaw(Entity e, StringView name) noexcept override {
-        if (!name.data || !Registry().IsAlive(e))
-            return false;
-        auto id = ECS::Registry::GetFamilyIDFromName(std::string_view(name));
-        return m_dynamicFamilies.contains(id) && Registry().RemoveDynamic(e, id);
+        return Registry().DetachRaw(e, SafeView(name));
     }
     void* GetRaw(Entity e, StringView name) const noexcept override {
-        if (!name.data || !Registry().IsAlive(e))
-            return nullptr;
-        auto id = ECS::Registry::GetFamilyIDFromName(std::string_view(name));
-        return m_dynamicFamilies.contains(id) ? Registry().GetRawByFamily(e, id) : nullptr;
-    }
-    bool IsEngineComponent(StringView name) const noexcept override {
-        return FindLogic(name) != nullptr;
-    }
-    void* AttachEngineRaw(Entity e, StringView name, uint32_t size, uint32_t alignment, uint64_t hash) noexcept override {
-        const auto* c = FindLogic(name);
-        if (!c || c->size != size || c->alignment != alignment || c->hash != hash || !Registry().IsAlive(e))
-            return nullptr;
-        if (c->releasePhysics != nullptr)
-            c->releasePhysics(Sim(), Registry(), e);
-        return c->ensure(Registry(), e);
-    }
-    bool DetachEngineRaw(Entity e, StringView name) noexcept override {
-        const auto* c = FindLogic(name);
-        if (!c || !Registry().IsAlive(e) || !Registry().GetRawByFamily(e, c->family()))
-            return false;
-        if (c->releasePhysics != nullptr)
-            c->releasePhysics(Sim(), Registry(), e);
-        c->remove(Registry(), e);
-        return true;
-    }
-    void* GetEngineRaw(Entity e, StringView name) const noexcept override {
-        const auto* c = FindLogic(name);
-        return c && Registry().IsAlive(e) ? Registry().GetRawByFamily(e, c->family()) : nullptr;
+        return Registry().GetRaw(e, SafeView(name));
     }
     uint32_t EntitiesWithRaw(StringView name, Entity* output, uint32_t capacity) const noexcept override {
-        if (!name.data)
-            return 0;
-        auto id = ECS::Registry::GetFamilyIDFromName(std::string_view(name));
-        if (id == UINT32_MAX || (!FindLogic(name) && !m_dynamicFamilies.contains(id)))
-            return 0;
-        auto matching = Registry().GetEntitiesByFamilyID(id);
-        if (output)
+        const auto matching = Registry().EntitiesWithRaw(SafeView(name));
+        if (output != nullptr && capacity > 0 && !matching.empty()) {
             std::copy_n(matching.begin(), std::min<size_t>(matching.size(), capacity), output);
+        }
         return static_cast<uint32_t>(matching.size());
     }
     // ------------------------------------------------------------ ISimulation
@@ -805,8 +715,6 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
     ZHLN::LogSink                        m_previousSink {};
     bool                                 m_installedSink = false;
     Ref<IErrorRegistry>                  m_errors;
-    std::unordered_set<uint32_t>         m_dynamicFamilies;
-    std::unordered_set<std::string_view> m_engineNames;
 };
 
 IEntities* LogicWorld::Entities() noexcept {

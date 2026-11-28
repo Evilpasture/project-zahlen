@@ -4,6 +4,7 @@
 #pragma once
 
 #include <engine/Frame.hpp>  // FrameDt / FrameAlpha / FrameIndex
+#include <Zahlen/Core/Reflection/TypeKey.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/SoA.hpp>
 #include <Zahlen/ECS/Entity.hpp>
@@ -198,13 +199,15 @@ inline constexpr bool IsLocalParam = false;
 template <typename T>
 inline constexpr bool IsLocalParam<Local<T>> = true;
 
+} // namespace TemplatedDetail
+
 // One slot of a node's state: where it is in the block, what lives there, and
 // how to bring it to life and take it down. The construct/destroy pair is
 // instantiated per T by the same walk that computes the offset, so a slot
 // cannot describe one type and construct another.
 struct LocalSlotDesc {
-    uint32_t familyId = 0;
-    uint32_t offset   = 0;
+    uint64_t typeKey = 0;
+    uint32_t offset  = 0;
 
     void (*construct)(void* slot) = nullptr;
     void (*destroy)(void* slot)   = nullptr;
@@ -212,19 +215,17 @@ struct LocalSlotDesc {
 
 // The layout of one node's state: one slot per Local<T> in the signature, laid
 // out in declaration order, with the total size and alignment the graph allocates
-// from. Built once per node from the signature; the node's block keeps its copy so
-// teardown destroys exactly what was constructed.
+// from. Points directly at static constexpr slot metadata produced from the
+// signature, with zero per-node metadata heap allocations.
 struct LocalLayout {
-    std::vector<LocalSlotDesc> slots;
-    size_t                     size  = 0;
-    size_t                     align = 1;
+    std::span<const LocalSlotDesc> slots {};
+    size_t                         size  = 0;
+    size_t                         align = 1;
 
-    [[nodiscard]] bool Empty() const noexcept {
+    [[nodiscard]] constexpr auto Empty() const noexcept -> bool {
         return slots.empty();
     }
 };
-
-} // namespace TemplatedDetail
 
 // Each argument names a component family and its access mode: const T (or
 // const T&) is read-only; T (or T&) is writable. Get/Raw/Entities only accept
@@ -235,6 +236,11 @@ struct LocalLayout {
 // the graph conservatively serialises it against other component accesses.
 template <typename... Comps>
 class Query {
+    template <typename...>
+    friend class Query;
+    template <typename...>
+    friend class ExclusiveQuery;
+
     static_assert(sizeof...(Comps) > 0, "Query needs at least one component");
     static_assert(
         ((!std::is_pointer_v<TemplatedDetail::RawComponent<Comps>> && !std::is_rvalue_reference_v<Comps> &&
@@ -253,14 +259,30 @@ class Query {
     template <typename T>
     using Element = std::conditional_t<ReadOnly<T>, const T, T>;
 
+    template <typename T>
+    static consteval auto IndexOf() noexcept -> size_t {
+        constexpr std::array<bool, sizeof...(Comps)> matches {std::is_same_v<T, TemplatedDetail::RawComponent<Comps>>...};
+        for (size_t i = 0; i < matches.size(); ++i) {
+            if (matches[i]) {
+                return i;
+            }
+        }
+        return matches.size();
+    }
+
   public:
-    explicit Query(Registry& registry) noexcept: _registry(&registry) {
+    explicit Query(Registry& registry) noexcept:
+        _registry(&registry), _sets {registry.FindSparseSet(Reflect::TypeKey<TemplatedDetail::RawComponent<Comps>>())...} {
+    }
+
+    Query(Registry& registry, std::array<SparseSet*, sizeof...(Comps)> sets) noexcept: _registry(&registry), _sets(sets) {
     }
 
     template <typename T>
         requires Declared<T>
     [[nodiscard]] auto Entities() const noexcept -> std::span<const Entity> {
-        return _registry->GetEntitiesWith<T>();
+        const SparseSet* set = _sets[IndexOf<T>()];
+        return set != nullptr ? std::span<const Entity>(set->GetDenseArray(), set->Count()) : std::span<const Entity> {};
     }
 
     // Alias for helpers shared with Registry (which has the same named API).
@@ -273,7 +295,14 @@ class Query {
     template <typename T>
         requires Declared<T>
     [[nodiscard]] auto Get(Entity entity) const noexcept -> ZHLN::Optional<Element<T>&> {
-        return _registry->Get<T>(entity);
+        SparseSet* set = _sets[IndexOf<T>()];
+        if (set == nullptr) {
+            return std::nullopt;
+        }
+        if (auto* ptr = static_cast<Element<T>*>(set->Get(entity))) {
+            return *ptr;
+        }
+        return std::nullopt;
     }
 
     template <typename T>
@@ -294,15 +323,16 @@ class Query {
     }
 
     // Project a larger query into a smaller view without exposing Registry&.
-    // Projection may drop write access but cannot manufacture it.
+    // Projection may drop write access but cannot manufacture it. Reuses
+    // already-resolved SparseSet pointers with zero hash lookups.
     template <typename... Subset>
         requires(
             sizeof...(Subset) > 0 && ((Declared<TemplatedDetail::RawComponent<Subset>> &&
-                                       (!ReadOnly<TemplatedDetail::RawComponent<Subset>> || std::is_const_v<std::remove_reference_t<Subset>>) ) &&
+                                       (!ReadOnly<TemplatedDetail::RawComponent<Subset>> || std::is_const_v<std::remove_reference_t<Subset>>)) &&
                                       ...)
         )
     [[nodiscard]] auto Select() const noexcept -> Query<Subset...> {
-        return Query<Subset...>(*_registry);
+        return Query<Subset...>(*_registry, std::array<SparseSet*, sizeof...(Subset)> {_sets[IndexOf<TemplatedDetail::RawComponent<Subset>>()]...});
     }
 
     // Projection to a narrower query type (Select<...> with a named target).
@@ -317,7 +347,11 @@ class Query {
     template <typename T>
         requires Declared<T>
     [[nodiscard]] auto Raw() const noexcept -> ZHLN::RestrictSpan<Element<T>> {
-        return _registry->GetRawArray<T>();
+        SparseSet* set = _sets[IndexOf<T>()];
+        if (set == nullptr) {
+            return ZHLN::RestrictSpan<Element<T>>(nullptr, 0);
+        }
+        return ZHLN::RestrictSpan<Element<T>>(static_cast<Element<T>*>(set->GetDataArray()), set->Count());
     }
 
     [[nodiscard]] auto IsAlive(Entity entity) const noexcept -> bool {
@@ -329,22 +363,86 @@ class Query {
 
     template <typename Fn>
     void ForEach(Fn&& fn) const {
-        // The smallest set bounds the iteration even when a query has many
-        // components; a missing set makes the intersection empty.
-        const std::array sets {Entities<TemplatedDetail::RawComponent<Comps>>()...};
-        const auto&      primary = *std::ranges::min_element(sets, {}, &std::span<const Entity>::size);
-        for (Entity entity: primary) {
-            const std::tuple<ZHLN::Optional<Element<TemplatedDetail::RawComponent<Comps>>&>...> components {
-                Get<TemplatedDetail::RawComponent<Comps>>(entity)...
-            };
-            if (std::apply([](const auto&... opts) { return (static_cast<bool>(opts) && ...); }, components)) {
-                std::apply([&](const auto&... opts) { std::invoke(fn, entity, *opts...); }, components);
+        for (const SparseSet* set: _sets) {
+            if (set == nullptr || set->Count() == 0) {
+                return;
             }
+        }
+
+        if constexpr (sizeof...(Comps) == 1) {
+            using Raw0             = std::tuple_element_t<0, std::tuple<TemplatedDetail::RawComponent<Comps>...>>;
+            using Elem0            = Element<Raw0>;
+            SparseSet*    set      = _sets[0];
+            const size_t  count    = set->Count();
+            const Entity* entities = set->GetDenseArray();
+            auto*         data     = static_cast<Elem0*>(set->GetDataArray());
+            for (size_t i = 0; i < count; ++i) {
+                std::invoke(fn, entities[i], data[i]);
+            }
+            return;
+        } else {
+            size_t bestIdx   = 0;
+            size_t bestCount = _sets[0]->Count();
+            for (size_t i = 1; i < sizeof...(Comps); ++i) {
+                const size_t c = _sets[i]->Count();
+                if (c < bestCount) {
+                    bestCount = c;
+                    bestIdx   = i;
+                }
+            }
+            DispatchForEach<0>(bestIdx, fn);
         }
     }
 
+  protected:
+    Registry*                                       _registry;
+    mutable std::array<SparseSet*, sizeof...(Comps)> _sets;
+
   private:
-    Registry* _registry;
+    template <size_t DriveIdx, typename Fn>
+    void DispatchForEach(size_t bestIdx, Fn&& fn) const {
+        if (bestIdx == DriveIdx) {
+            RunWithDriver<DriveIdx>(fn, std::make_index_sequence<sizeof...(Comps)> {});
+            return;
+        }
+        if constexpr (DriveIdx + 1 < sizeof...(Comps)) {
+            DispatchForEach<DriveIdx + 1>(bestIdx, fn);
+        }
+    }
+
+    template <size_t DriveIdx, typename Fn, size_t... Is>
+    void RunWithDriver(Fn&& fn, std::index_sequence<Is...>) const {
+        using RawTuple  = std::tuple<TemplatedDetail::RawComponent<Comps>...>;
+        using DriveRaw  = std::tuple_element_t<DriveIdx, RawTuple>;
+        using DriveElem = Element<DriveRaw>;
+
+        SparseSet*    driver   = _sets[DriveIdx];
+        const size_t  count    = driver->Count();
+        const Entity* entities = driver->GetDenseArray();
+        auto*         driveArr = static_cast<DriveElem*>(driver->GetDataArray());
+
+        for (size_t i = 0; i < count; ++i) {
+            const Entity                        entity = entities[i];
+            std::array<void*, sizeof...(Comps)> ptrs {};
+            bool                                allPresent = true;
+            (
+                [&] {
+                    if constexpr (Is == DriveIdx) {
+                        ptrs[Is] = const_cast<void*>(static_cast<const void*>(&driveArr[i]));
+                    } else if (allPresent) {
+                        void* p  = _sets[Is]->Get(entity);
+                        ptrs[Is] = p;
+                        if (p == nullptr) {
+                            allPresent = false;
+                        }
+                    }
+                }(),
+                ...);
+            if (allPresent) {
+                std::invoke(fn, entity, *static_cast<Element<std::tuple_element_t<Is, RawTuple>>*>(ptrs[Is])...);
+            }
+        }
+    }
 };
 
 // Transitional view for systems that must make an immediate structural add
@@ -361,21 +459,31 @@ class ExclusiveQuery : public Query<Comps...> {
                                        !std::is_const_v<std::remove_reference_t<Comps>>) || ...);
 
   public:
-    explicit ExclusiveQuery(Registry& registry) noexcept: Query<Comps...>(registry), _registry(&registry) {}
+    explicit ExclusiveQuery(Registry& registry) noexcept: Query<Comps...>(registry) {
+    }
+
+    ExclusiveQuery(Registry& registry, std::array<SparseSet*, sizeof...(Comps)> sets) noexcept: Query<Comps...>(registry, sets) {
+    }
 
     // Creates a live, component-free entity immediately; component attachment
     // remains either AddIfMissing or explicitly deferred through an ECB.
-    [[nodiscard]] auto CreateEntity() const -> Entity { return _registry->Create(); }
-
-    template <typename T>
-        requires (Writable<T> && std::is_same_v<T, std::remove_cvref_t<T>>)
-    auto AddIfMissing(Entity entity, T value) const -> T& {
-        if (auto existing = this->template Get<T>(entity)) return *existing;
-        return _registry->Add(entity, std::move(value));
+    [[nodiscard]] auto CreateEntity() const -> Entity {
+        return this->_registry->Create();
     }
 
-  private:
-    Registry* _registry;
+    template <typename T>
+        requires(Writable<T> && std::is_same_v<T, std::remove_cvref_t<T>>)
+    auto AddIfMissing(Entity entity, T value) const -> T& {
+        if (auto existing = this->template Get<T>(entity)) {
+            return *existing;
+        }
+        T&               added = this->_registry->Add(entity, std::move(value));
+        constexpr size_t idx   = Query<Comps...>::template IndexOf<T>();
+        if (this->_sets[idx] == nullptr) {
+            this->_sets[idx] = this->_registry->FindSparseSet(Reflect::TypeKey<T>());
+        }
+        return added;
+    }
 };
 
 namespace TemplatedDetail {

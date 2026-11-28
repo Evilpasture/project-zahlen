@@ -3,19 +3,20 @@
 
 #pragma once
 
-#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Optional.hpp>
+#include <Zahlen/Core/Reflection/TypeKey.hpp>
+#include <cstdint>
 #include <memory>
-#include <source_location>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace ZHLN::ECS {
 
-// Type-erased, owning container for optional domain services (e.g.
-// Context). Kept reflection-free so headers included inside C++20
-// module global fragments never pull std::meta across module boundaries.
+// Type-erased, owning container for optional domain services.
+// Keyed by Reflect::TypeKey<T>() so service identity agrees across TUs and
+// DSOs (unlike std::source_location::function_name()).
+//
 // A service a graph node may not pull through the type-erased store.
 //
 // The store is reachable from every carrier that has the bundle, so without this
@@ -37,8 +38,8 @@ class ExtensionServices {
 
     template <typename T, typename... Args>
     auto Emplace(Args&&... args) -> std::remove_cv_t<T>& {
-        using Clean       = std::remove_cv_t<T>;
-        const uint64_t id = TypeKey<Clean>();
+        using Clean           = std::remove_cv_t<T>;
+        constexpr uint64_t id = Reflect::TypeKey<Clean>();
         for (Entry& entry: _entries) {
             if (entry.typeId == id) {
                 auto replacement = std::unique_ptr<void, Deleter>(new Clean(std::forward<Args>(args)...), &Destroy<Clean>);
@@ -46,16 +47,16 @@ class ExtensionServices {
                 return *static_cast<Clean*>(entry.instance.get());
             }
         }
-        auto instance = std::unique_ptr<void, Deleter>(new Clean(std::forward<Args>(args)...), &Destroy<Clean>);
-        auto* raw     = static_cast<Clean*>(instance.get());
+        auto  instance = std::unique_ptr<void, Deleter>(new Clean(std::forward<Args>(args)...), &Destroy<Clean>);
+        auto* raw      = static_cast<Clean*>(instance.get());
         _entries.push_back(Entry {.typeId = id, .instance = std::move(instance)});
         return *raw;
     }
 
     template <typename T>
     [[nodiscard]] auto Get() noexcept -> ZHLN::Optional<std::remove_cv_t<T>&> {
-        using Clean       = std::remove_cv_t<T>;
-        const uint64_t id = TypeKey<Clean>();
+        using Clean           = std::remove_cv_t<T>;
+        constexpr uint64_t id = Reflect::TypeKey<Clean>();
         for (const Entry& entry: _entries) {
             if (entry.typeId == id && entry.instance != nullptr) {
                 return *static_cast<Clean*>(entry.instance.get());
@@ -66,8 +67,8 @@ class ExtensionServices {
 
     template <typename T>
     [[nodiscard]] auto Get() const noexcept -> ZHLN::Optional<const std::remove_cv_t<T>&> {
-        using Clean       = std::remove_cv_t<T>;
-        const uint64_t id = TypeKey<Clean>();
+        using Clean           = std::remove_cv_t<T>;
+        constexpr uint64_t id = Reflect::TypeKey<Clean>();
         for (const Entry& entry: _entries) {
             if (entry.typeId == id && entry.instance != nullptr) {
                 return *static_cast<const Clean*>(entry.instance.get());
@@ -84,11 +85,6 @@ class ExtensionServices {
 
   private:
     using Deleter = void (*)(void*) noexcept;
-
-    template <typename Clean>
-    [[nodiscard]] static consteval auto TypeKey() noexcept -> uint64_t {
-        return Hash64(std::source_location::current().function_name());
-    }
 
     template <typename Clean>
     static void Destroy(void* ptr) noexcept {

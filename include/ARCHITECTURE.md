@@ -782,7 +782,7 @@ it. `Core/COM/` is the mechanism; this is the surface built on it.
 | `Types.hpp` | GPU resource and procedural mesh chain nodes (`BufferCreateInfo`, `TextureCreateInfo`, `PbrMaterialConfig`, `MeshBuildOptions`, `MeshStreamsDesc`, `BoxMeshDesc`, ...) and static asserts keeping reused value types fixed-layout |
 | `IEngine.hpp` | lifecycle (`IsRunning`, `ProcessEvents`, `RequestClose`, `Tick`, `ClearScene`) and borrowed accessors for the seven capability interfaces |
 | `IGraphicsDevice.hpp` | resolution, viewport, chained `ApplySettings` / `GetSettings` (full `GraphicsSettings` or sub-slices), buffers, textures, PBR materials, procedural & stream meshes, mesh registries and BLAS builds |
-| `IEntities.hpp` | type-erased ECS operations (`AttachRaw`, `GetRaw`, `DetachRaw`, `AttachEngineRaw`, `GetEngineRaw`, `DetachEngineRaw`, `EntitiesWithRaw`), 34 published `ZHLN::Components` with `SceneResources` ownership safety, and consumer-side typed templates |
+| `IEntities.hpp` | unified type-erased ECS operations (`IsEngineComponent`, `AttachRaw`, `GetRaw`, `DetachRaw`, `EntitiesWithRaw`), 40 published `ZHLN::Components` with `SceneResources` retirement hooks, and consumer-side typed templates |
 | `ISimulation.hpp` | chained rigid-body (`BoxShapeDesc`, `SphereShapeDesc`, `CapsuleShapeDesc`, `CylinderShapeDesc`, `PlaneShapeDesc`, `MeshShapeDesc`, `HeightFieldShapeDesc`, `CompoundShapeDesc` + pose/surface/filter) and character creation, raycasts, sphere queries, velocities, kinematic poses, collision filters and debug geometry |
 | `IAudioDevice.hpp` | chained `PostEvent` (`AudioEvent`) and `CreateVoice` (`VoiceDesc` + encoded-bytes span) plus voice playback, volume, looping and spatial position controls |
 | `IAssetLibrary.hpp` | `AssetHash`, prefab cache interrogation, chained `Instantiate` (`SpawnParams`), chained `SpawnPrimitive` (`SpawnBox`, `SpawnPlane`, `SpawnSphere`, `SpawnCylinder`, `SpawnCone`), and borrowed environment-image pixels |
@@ -829,16 +829,18 @@ Every method is `noexcept`, which costs nothing to honour: Zahlen compiles with
 `static_cast` chain rather than `dynamic_cast`.
 
 **The ECS seam.** A virtual function cannot be a template, so the vtable
-carries `AttachRaw` / `GetRaw` / `DetachRaw` plus `AttachEngineRaw` /
-`GetEngineRaw` / `DetachEngineRaw` / `EntitiesWithRaw` keyed on a component's
-canonical type name and recursive leaf `LayoutHash<T>()`, and `IEntities`
-rebuilds the typed API (`Attach<T>`, `Get<T>`, `Detach<T>`, `EntitiesWith<T>`,
-`SingletonEntity<T>`) from inline templates that compile in the consumer's own
-TU. Thirty-five fixed-layout `ZHLN::Components` are published directly to their
-typed ECS families (releasing owned Jolt/audio/GPU handles via `SceneResources`
-on overwrite or detach); consumer-defined components fall through to the
-registry's dynamic-component path, which holds raw bytes and runs no destructor
--- hence the `Component` constraint.
+carries one unified set of raw operations (`IsEngineComponent`, `AttachRaw`,
+`GetRaw`, `DetachRaw`, `EntitiesWithRaw`) keyed on a component's canonical type
+name (whose 64-bit hash matches `Reflect::TypeKey<T>()`) and recursive leaf
+`LayoutHash<T>()`, and `IEntities` rebuilds the typed API (`Attach<T>`,
+`Get<T>`, `Detach<T>`, `EntitiesWith<T>`, `SingletonEntity<T>`) from inline
+templates that compile in the consumer's own TU. Forty fixed-layout
+`ZHLN::Components` are published directly to their typed ECS slots via
+`Registry::SetPolicy<T>` (releasing owned Jolt/audio/GPU handles via
+`SceneResources` retirement hooks on overwrite, detach, or entity destruction);
+unpublished native components and short-name aliases are refused, while
+consumer-defined components auto-register dynamic raw byte storage -- hence the
+`Component` constraint.
 
 Interface IDs are a hash of the qualified type name, so adding a capability
 interface needs no GUID and no registry.

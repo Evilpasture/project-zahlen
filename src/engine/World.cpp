@@ -64,7 +64,6 @@ World::~World() {
     }
 
     _impl->visibility.Clear();
-    _impl->articulationContext.reset();
     _impl->mainECB.reset();
 
     // A standalone World can still contain physics owners. Release the bulk
@@ -96,6 +95,7 @@ World::~World() {
         }
     }
     registry.Clear();
+    _impl->articulationContext.reset();
     _impl->physicsContext.reset();
 
     if (_impl->joltAcquired) {

@@ -132,12 +132,13 @@ struct IAssetLibrary : IObject {
     virtual Result<uint32_t> Instantiate(uint64_t hash, const ChainInNode* spawnChain, Entity* entities,
                                                        uint32_t capacity) noexcept = 0;
 
-    // Spawns a scene-owned procedural primitive entity (mesh, material,
-    // transforms, OwnedMeshComponent, and optional role-typed body component). Accepts
-    // exactly one shape node (BoxMeshDesc, PlaneMeshDesc, SphereMeshDesc,
-    // CylinderMeshDesc, or ConeMeshDesc) plus optional PrefabFactory::SpawnParams.
-    // Optional MeshBuildOptions explicitly selects BLAS construction (default
-    // true here for native spawn compatibility); retained across device rebuilds.
+    // Spawns a procedural primitive entity (mesh, material, transforms, and
+    // optional role-typed body component). Its procedural mesh and default
+    // material are cached by deterministic AssetID in the asset library and
+    // automatically rebuilt across device resets. Accepts exactly one shape
+    // node (BoxMeshDesc, PlaneMeshDesc, SphereMeshDesc, CylinderMeshDesc, or
+    // ConeMeshDesc) plus optional PrefabFactory::SpawnParams and optional
+    // MeshBuildOptions (default buildBLAS = true).
     virtual Result<Entity> SpawnPrimitive(const ChainInNode* primitiveChain) noexcept = 0;
 
     [[nodiscard]] virtual Option<EnvironmentImageInfo> FindEnvironmentImage(StringView key) const noexcept = 0;

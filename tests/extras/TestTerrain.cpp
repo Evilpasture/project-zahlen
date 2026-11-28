@@ -104,12 +104,17 @@ struct TerrainHostSuite {
                 return {};
             auto&      entities = *engine->Entities();
             auto&      gfx      = *engine->Graphics();
-            const auto owner    = *entities.Get<Components::OwnedMeshComponent>(*tile);
             const auto binding  = *entities.Get<Components::MeshComponent>(*tile);
+            const auto initial  = gfx.FindMesh(binding.meshAsset);
+            if (!ExpectTrue(initial.HasValue() && initial.value.posBuffer != BufferID::Invalid))
+                return {};
             gfx.UnregisterMesh(binding.meshAsset);
             gfx.UnregisterMaterial(binding.materialAsset);
             ExpectTrue(host.BeforeRender(*engine.Get(), 0).has_value());
-            ExpectEq(entities.Get<Components::OwnedMeshComponent>(*tile)->mesh.posBuffer, owner.mesh.posBuffer);
+            const auto rebound = gfx.FindMesh(binding.meshAsset);
+            ExpectTrue(rebound.HasValue());
+            if (rebound.HasValue())
+                ExpectEq(rebound.value.posBuffer, initial.value.posBuffer);
             entities.Get<Terrain::TileComponent>(*tile)->roughness = .42f;
             ExpectTrue(host.BeforeRender(*engine.Get(), 0).has_value());
             auto material = gfx.FindMaterial(binding.materialAsset);
@@ -122,8 +127,8 @@ struct TerrainHostSuite {
             ExpectTrue(engine->DeviceGeneration() > generation);
             ExpectTrue(host.BeforeRender(*engine.Get(), 0).has_value());
             ExpectEq(host.SampleHeightAt(0, 0), height);
-            ExpectTrue(gfx.FindMesh(binding.meshAsset).HasValue());
-            ExpectTrue(entities.Get<Components::OwnedMeshComponent>(*tile)->mesh.posBuffer != BufferID::Invalid);
+            const auto recovered = gfx.FindMesh(binding.meshAsset);
+            ExpectTrue(recovered.HasValue() && recovered.value.posBuffer != BufferID::Invalid);
             material = gfx.FindMaterial(binding.materialAsset);
             ExpectTrue(material.HasValue());
             if (material.HasValue())

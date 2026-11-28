@@ -7,6 +7,7 @@
 #include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Core/Reflection/Services.hpp>
+#include <Zahlen/Core/Reflection/TypeKey.hpp>
 #include <Zahlen/Core/SoA.hpp>
 #include <engine/Frame.hpp>
 #include <Zahlen/Log.hpp>
@@ -20,6 +21,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <new>
 #include <ranges>
@@ -53,10 +55,11 @@ inline constexpr bool IsUnscheduledWorldAccess =
 // SystemInfo whose function ignores its argument is unaffected.
 struct SystemCall {
     void*                                 carrier   = nullptr;
-    void*                                 local     = nullptr;
-    const TemplatedDetail::LocalSlotDesc* slots     = nullptr;
-    size_t                                slotCount = 0;
+    void*                local     = nullptr;
+    const LocalSlotDesc* slots     = nullptr;
+    size_t               slotCount = 0;
     EntityCommandBuffer*                  ecb       = nullptr;
+    SparseSet* const*                     querySets = nullptr;
 };
 
 // Parameters are deliberately matched by *exact* type. In particular a plain
@@ -214,8 +217,8 @@ struct ParameterResolver<EventWriter<T>> {
 };
 
 // A node's own state. The block was allocated for *this* node from the layout its
-// signature produced, so the lookup is a walk over a handful of slots for the
-// family id of LocalToken<T> -- no TypeId resolution, no world, and nothing
+// signature produced, so the lookup scans a handful of slots by compile-time
+// Reflect::TypeKey<T>() -- no runtime id resolution, no world, and nothing
 // outside this system can reach the storage.
 //
 // The asserts are the mis-registration boundary: a hand-built SystemInfo that
@@ -225,10 +228,11 @@ template <typename T>
 struct ParameterResolver<Local<T>> {
     template <typename CarrierType>
     static auto Resolve(CarrierType& carrier) noexcept -> Local<T> {
-        const TemplatedDetail::LocalStateView& state = carrier.local;
+        const LocalStateView& state = carrier.local;
         ZHLN::Assert(state.block != nullptr, "Local<T> in a system whose node was given no state: the graph allocates it from the signature");
+        constexpr uint64_t targetKey = Reflect::TypeKey<T>();
         for (size_t i = 0; i < state.count; ++i) {
-            if (state.slots[i].familyId == ComponentFamily::GetTypeID<TemplatedDetail::LocalToken<T>>()) {
+            if (state.slots[i].typeKey == targetKey) {
                 return {static_cast<T*>(static_cast<void*>(static_cast<std::byte*>(state.block) + state.slots[i].offset))};
             }
         }
@@ -293,20 +297,6 @@ struct ParameterResolver<LinearArena&> {
 
 namespace TemplatedDetail {
 
-// One Local<T> slot as the compiler sees it. The family id is deliberately the
-// one member that is not a constant expression: ComponentFamily::GetTypeID caches
-// a registry-side id, so it is reached through a function pointer that the layout
-// builder calls at run time.
-struct LocalSlotMeta {
-    uint32_t offset = 0;
-    uint32_t size   = 0;
-    uint32_t align  = 1;
-
-    uint32_t (*familyId)()        = nullptr;
-    void (*construct)(void* slot) = nullptr;
-    void (*destroy)(void* slot)   = nullptr;
-};
-
 template <typename Inspector, std::size_t I>
 inline constexpr bool IsLocalParameter = IsLocalParam<std::remove_cvref_t<typename Inspector::template ParameterType<I>>>;
 
@@ -324,62 +314,58 @@ consteval auto LocalSlotCount() -> std::size_t {
     return slotCount;
 }
 
+// The signature's state, laid out at compile time: aligned offsets in
+// declaration order, compile-time TypeKey<T>(), total size/alignment, and the
+// per-slot construct/destroy pair stored in static constexpr storage.
 template <auto SystemFn>
-struct LocalLayoutDesc {
-    std::array<LocalSlotMeta, LocalSlotCount<SystemFn>()> slots {};
-    std::size_t                                           size  = 0;
-    std::size_t                                           align = 1;
+struct LocalLayoutStorage {
+    static constexpr std::size_t kSlotCount = LocalSlotCount<SystemFn>();
+
+    struct Described {
+        std::array<LocalSlotDesc, kSlotCount> slots {};
+        std::size_t                           size  = 0;
+        std::size_t                           align = 1;
+    };
+
+    static consteval auto Compute() -> Described {
+        using Inspector = Reflect::CallableInspector<SystemFn>;
+        Described   desc {};
+        std::size_t index  = 0;
+        std::size_t offset = 0;
+
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (
+                [&] {
+                    if constexpr (IsLocalParameter<Inspector, Is>) {
+                        using T             = LocalParameterType<Inspector, Is>;
+                        offset              = Math::AlignUp(offset, alignof(T));
+                        desc.slots[index++] = LocalSlotDesc {
+                            .typeKey   = Reflect::TypeKey<T>(),
+                            .offset    = static_cast<uint32_t>(offset),
+                            .construct = +[](void* slot) { ::new (slot) T {}; },
+                            .destroy   = +[](void* slot) { std::destroy_at(static_cast<T*>(slot)); },
+                        };
+                        offset += sizeof(T);
+                        desc.align = alignof(T) > desc.align ? alignof(T) : desc.align;
+                    }
+                }(),
+                ...);
+        }(std::make_index_sequence<Inspector::ParameterCount()> {});
+        desc.size = offset;
+        return desc;
+    }
+
+    static constexpr Described kDescribed = Compute();
 };
 
-// The signature's state, laid out once: aligned offsets in declaration order,
-// total size, and the per-slot construct/destroy pair. The allocator and the
-// resolver both come from here, so a slot cannot be described with one type and
-// constructed with another.
 template <auto SystemFn>
-consteval auto DescribeLocalSlots() -> LocalLayoutDesc<SystemFn> {
-    using Inspector = Reflect::CallableInspector<SystemFn>;
-    LocalLayoutDesc<SystemFn> desc {};
-    std::size_t               index  = 0;
-    std::size_t               offset = 0;
-
-    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-        (
-            [&] {
-                if constexpr (IsLocalParameter<Inspector, Is>) {
-                    using T             = LocalParameterType<Inspector, Is>;
-                    offset              = Math::AlignUp(offset, alignof(T));
-                    desc.slots[index++] = LocalSlotMeta {
-                        .offset    = static_cast<uint32_t>(offset),
-                        .size      = static_cast<uint32_t>(sizeof(T)),
-                        .align     = static_cast<uint32_t>(alignof(T)),
-                        .familyId  = +[]() -> uint32_t { return ComponentFamily::GetTypeID<LocalToken<T>>(); },
-                        .construct = +[](void* slot) { ::new (slot) T {}; },
-                        .destroy   = +[](void* slot) { std::destroy_at(static_cast<T*>(slot)); },
-                    };
-                    offset += sizeof(T);
-                    desc.align = alignof(T) > desc.align ? alignof(T) : desc.align;
-                }
-            }(),
-            ...);
-    }(std::make_index_sequence<Inspector::ParameterCount()> {});
-    desc.size = offset;
-    return desc;
-}
-
-// The same layout in its runtime form: what the graph allocates from, and what
-// the resolver scans. Built once per node, when the system is added.
-template <auto SystemFn>
-inline auto MakeLocalLayout() -> LocalLayout {
-    constexpr auto desc = DescribeLocalSlots<SystemFn>();
-
-    LocalLayout layout;
-    layout.size  = desc.size;
-    layout.align = desc.align;
-    layout.slots.reserve(desc.slots.size());
-    for (const LocalSlotMeta& meta: desc.slots) {
-        layout.slots.push_back(LocalSlotDesc {.familyId = meta.familyId(), .offset = meta.offset, .construct = meta.construct, .destroy = meta.destroy});
-    }
-    return layout;
+[[nodiscard]] consteval auto MakeLocalLayout() noexcept -> LocalLayout {
+    using Storage = LocalLayoutStorage<SystemFn>;
+    return LocalLayout {
+        .slots = Storage::kDescribed.slots,
+        .size  = Storage::kDescribed.size,
+        .align = Storage::kDescribed.align,
+    };
 }
 
 // ------ signature checks over the written parameter types -------------------
@@ -594,16 +580,17 @@ consteval void AdmitParameters() {
 using SystemFunc = void (*)(void*);
 
 struct SystemInfo {
-    SystemFunc                   update_func = nullptr;
-    const char*                  name        = "UnnamedSystem";
-    std::vector<ComponentAccess> access_pattern;
+    SystemFunc                      update_func = nullptr;
+    const char*                     name        = "UnnamedSystem";
+    std::span<const ResourceAccess> access_pattern {};
+    std::span<const uint64_t>       query_keys {};
 
     // The state this system's signature keeps between frames, described by the
-    // signature itself: one slot per Local<T>, with the offsets, sizes and
-    // construct/destroy pair the node needs to own a block. Empty when the
-    // system names no Local<T>. A hand-built SystemInfo may leave it empty; a
-    // function that resolves a Local<T> without one stops at the resolver.
-    TemplatedDetail::LocalLayout local;
+    // signature itself: one slot per Local<T>, pointing at static constexpr
+    // metadata with offsets and construct/destroy hooks. Empty when the system
+    // names no Local<T>. A hand-built SystemInfo may leave it empty; a function
+    // that resolves a Local<T> without one stops at the resolver.
+    LocalLayout local {};
 
     bool usesCommandBuffer = false;
     bool enabled           = true;
@@ -635,14 +622,14 @@ class LocalBlock {
     }
 
     // Allocate the layout and bring every slot to life, in declaration order.
-    void Adopt(TemplatedDetail::LocalLayout layout) {
+    void Adopt(LocalLayout layout) {
         Reset();
-        _layout = std::move(layout);
+        _layout = layout;
         if (_layout.size == 0) {
             return;
         }
         _block = ::operator new(_layout.size, std::align_val_t(_layout.align));
-        for (const TemplatedDetail::LocalSlotDesc& slot: _layout.slots) {
+        for (const LocalSlotDesc& slot: _layout.slots) {
             slot.construct(static_cast<std::byte*>(_block) + slot.offset);
         }
     }
@@ -653,10 +640,10 @@ class LocalBlock {
         if (_block == nullptr) {
             return;
         }
-        for (auto& slot: std::ranges::reverse_view(_layout.slots)) {
+        for (const auto& slot: std::ranges::reverse_view(_layout.slots)) {
             slot.destroy(static_cast<std::byte*>(_block) + slot.offset);
         }
-        for (const TemplatedDetail::LocalSlotDesc& slot: _layout.slots) {
+        for (const LocalSlotDesc& slot: _layout.slots) {
             slot.construct(static_cast<std::byte*>(_block) + slot.offset);
         }
     }
@@ -664,7 +651,7 @@ class LocalBlock {
     // Take the state down, in reverse order, and hand the bytes back.
     void Reset() noexcept {
         if (_block != nullptr) {
-            for (auto& slot: std::ranges::reverse_view(_layout.slots)) {
+            for (const auto& slot: std::ranges::reverse_view(_layout.slots)) {
                 slot.destroy(static_cast<std::byte*>(_block) + slot.offset);
             }
             ::operator delete(_block, std::align_val_t(_layout.align));
@@ -676,7 +663,7 @@ class LocalBlock {
     [[nodiscard]] auto Pointer() const noexcept -> void* {
         return _block;
     }
-    [[nodiscard]] auto Slots() const noexcept -> const TemplatedDetail::LocalSlotDesc* {
+    [[nodiscard]] auto Slots() const noexcept -> const LocalSlotDesc* {
         return _layout.slots.data();
     }
     [[nodiscard]] auto SlotCount() const noexcept -> size_t {
@@ -689,8 +676,8 @@ class LocalBlock {
         _layout = std::move(other._layout);
     }
 
-    void*                        _block = nullptr;
-    TemplatedDetail::LocalLayout _layout {};
+    void*       _block = nullptr;
+    LocalLayout _layout {};
 };
 
 // Optional scheduling dependency for an ECS graph. Task argument storage and
@@ -722,9 +709,12 @@ class SystemGraphCore {
     // their component accesses in their signature. The function pointer takes
     // the carrier the graph was executed with.
     void AddSystem(SystemInfo info);
+    void AddSystem(SystemInfo info, std::vector<ResourceAccess> ownedAccesses);
     auto AddSystemBefore(SystemInfo info, std::string_view beforeSystem) -> bool;
+    auto AddSystemBefore(SystemInfo info, std::vector<ResourceAccess> ownedAccesses, std::string_view beforeSystem) -> bool;
 
-    void DeclareExternalWrites(const char* label, std::vector<ComponentAccess> accesses);
+    void DeclareExternalWrites(const char* label, std::span<const ResourceAccess> accesses);
+    void DeclareExternalWrites(const char* label, std::initializer_list<ResourceAccess> accesses);
 
     void Compile();
     void Execute(void* carrier);
@@ -741,24 +731,31 @@ class SystemGraphCore {
     void               Clear() noexcept;
 
     [[nodiscard]] static auto HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept -> bool;
+    [[nodiscard]] static auto HasConflict(std::span<const ResourceAccess> accessesA, std::span<const ResourceAccess> accessesB) noexcept -> bool;
 
   protected:
     void BindCommandRegistry(Registry& registry, EntityCommandBuffer::DestroyFn destroy = nullptr) noexcept;
     [[nodiscard]] auto CommandDestroy() const noexcept -> EntityCommandBuffer::DestroyFn { return _commandDestroy; }
 
   private:
-    // An aggregate on purpose: every construction site spells out the fields it
-    // sets. The state it owns makes it move-only, and the implicit moves do the
-    // right thing because LocalBlock's do.
     struct Node {
-        SystemInfo                           info;
-        std::vector<uint32_t>                dependents;
+        SystemInfo                           info {};
+        // Populated only for DeclareExternalWrites and hand-built dynamic
+        // nodes; constexpr SystemSignature nodes leave this empty.
+        std::vector<ResourceAccess>          ownedAccesses {};
+        std::vector<uint32_t>                dependents {};
         uint32_t                             initialDependencyCount = 0;
 
         // This node's own state (Local<T>), allocated from the layout in `info`
         // when the node is added and destroyed with the node.
-        LocalBlock                           local;
-        std::unique_ptr<EntityCommandBuffer> ecb;
+        LocalBlock                           local {};
+        std::unique_ptr<EntityCommandBuffer> ecb {};
+        std::vector<SparseSet*>              cachedQuerySets {};
+        uint64_t                             cachedSchemaEpoch = ~uint64_t {0};
+
+        [[nodiscard]] auto EffectiveAccessPattern() const noexcept -> std::span<const ResourceAccess> {
+            return !ownedAccesses.empty() ? std::span<const ResourceAccess>(ownedAccesses) : info.access_pattern;
+        }
     };
 
     struct ExecutionContext;
@@ -886,9 +883,10 @@ class SystemGraph: public SystemGraphCore {
     static auto MakeSystemInfo() -> SystemInfo {
         using Signature = SystemSignature<SystemFn>;
         SystemInfo info;
-        info.name        = Signature::NameCString();
-        info.update_func = &CarrierThunk<SystemFn>;
-        info.access_pattern = Signature::PopulateAccessPattern();
+        info.name              = Signature::NameCString();
+        info.update_func       = &CarrierThunk<SystemFn>;
+        info.access_pattern    = Signature::AccessPattern();
+        info.query_keys        = Signature::QueryKeys();
         // The signature's own description of the state it keeps between frames;
         // the node allocates the block from it. A system with no Local<T> gets an
         // empty layout and no allocation.
@@ -908,8 +906,9 @@ class SystemGraph: public SystemGraphCore {
     static void CarrierThunk(void* arg) {
         const auto* call    = static_cast<const SystemCall*>(arg);
         CarrierType carrier = *static_cast<const CarrierType*>(call->carrier);
-        carrier.local       = TemplatedDetail::LocalStateView {.block = call->local, .slots = call->slots, .count = call->slotCount};
+        carrier.local       = LocalStateView {.block = call->local, .slots = call->slots, .count = call->slotCount};
         carrier.ecb         = call->ecb;
+        carrier.querySets   = call->querySets;
         SystemSignature<SystemFn>::template Invoke<ParameterResolver, CarrierType>(carrier);
     }
 

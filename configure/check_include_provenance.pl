@@ -180,6 +180,7 @@ my %FIRST_PARTY = (
     DispatchInChain             => ['include/Zahlen/Core/COM/Chain.hpp'],
     DispatchOutChain            => ['include/Zahlen/Core/COM/Chain.hpp'],
     'ZHLN::Reflect::LayoutHash' => ['include/Zahlen/Core/Reflection/LayoutHash.hpp'],
+    'ZHLN::Reflect::TypeKey'    => ['include/Zahlen/Core/Reflection/TypeKey.hpp'],
     'ZHLN::Reflect::FunctionTraits'          => ['include/Zahlen/Core/Reflection/Callable.hpp'],
     'ZHLN::Reflect::EntityToken'             => ['include/Zahlen/Core/Reflection/Entity.hpp'],
     'ZHLN::Reflect::EntityTokenOf'           => ['include/Zahlen/Core/Reflection/Entity.hpp'],

@@ -102,11 +102,34 @@ auto Session::Draw(COM::IEngine& engine, HostUI& hostUI, float dt) -> std::expec
         return std::unexpected(result.error);
     return {};
 }
+void Session::ReleaseFallbackMeshes(COM::IEngine& engine) {
+    auto&          graphics = *engine.Graphics();
+    const uint64_t gen      = engine.DeviceGeneration();
+    for (auto& [key, entry]: _fallbackMeshes) {
+        (void)key;
+        if (entry.mesh.posBuffer != BufferID::Invalid && entry.generation == gen) {
+            graphics.UnregisterMesh(entry.assetID);
+            graphics.DestroyMesh(entry.mesh);
+        }
+    }
+    _fallbackMeshes.clear();
+}
 auto Session::RefreshPrimitives(COM::IEngine& engine) -> std::expected<void, ErrorCode> {
-    auto& entities = *engine.Entities();
-    auto& graphics = *engine.Graphics();
+    auto&          entities = *engine.Entities();
+    auto&          graphics = *engine.Graphics();
+    const uint64_t gen      = engine.DeviceGeneration();
     std::erase_if(_materials, [&](const auto& entry) {
         return !entities.IsAlive(Entity::Unpack(entry.first)) || entities.Get<Components::PendingDestroy>(Entity::Unpack(entry.first));
+    });
+    std::erase_if(_fallbackMeshes, [&](auto& entry) {
+        const Entity entity = Entity::Unpack(entry.first);
+        if (entities.IsAlive(entity) && !entities.Get<Components::PendingDestroy>(entity))
+            return false;
+        if (entry.second.mesh.posBuffer != BufferID::Invalid && entry.second.generation == gen) {
+            graphics.UnregisterMesh(entry.second.assetID);
+            graphics.DestroyMesh(entry.second.mesh);
+        }
+        return true;
     });
     for (auto entity: entities.EntitiesWith<Components::SceneSourceComponent>()) {
         auto source = *entities.Get<Components::SceneSourceComponent>(entity);
@@ -133,45 +156,43 @@ auto Session::RefreshPrimitives(COM::IEngine& engine) -> std::expected<void, Err
             it->second.roughness = pbr->roughness;
             it->second.metallic  = pbr->metallic;
         }
-        const auto* owner = entities.Get<Components::OwnedMeshComponent>(entity);
-        Mesh        mesh  = owner ? owner->mesh : Mesh {};
-        if (mesh.posBuffer == BufferID::Invalid) {
-            Mesh                        built {};
-            COM::Result<void>           result = COM::Error::InvalidArgument;
-            const COM::MeshBuildOptions options {.buildBLAS = _buildBLAS};
-            const FVec4                 color = it->second.baseColor;
-            switch (source.shape) {
-                case Scene::ShapeKind::Box:
-                    result = graphics.CreateMesh(COM::InChain(COM::BoxMeshDesc {source.halfExtents, color}, options), COM::OutChain(built));
-                    break;
-                case Scene::ShapeKind::Plane:
-                    result = graphics.CreateMesh(COM::InChain(COM::PlaneMeshDesc {source.extent, color}, options), COM::OutChain(built));
-                    break;
-                case Scene::ShapeKind::Sphere:
-                    result = graphics.CreateMesh(COM::InChain(COM::SphereMeshDesc {source.extent, color}, options), COM::OutChain(built));
-                    break;
-                case Scene::ShapeKind::Cylinder:
-                    result = graphics.CreateMesh(
-                        COM::InChain(COM::CylinderMeshDesc {source.extent, source.halfExtents.y * 2, color}, options), COM::OutChain(built)
-                    );
-                    break;
-                case Scene::ShapeKind::Cone:
-                    result =
-                        graphics.CreateMesh(COM::InChain(COM::ConeMeshDesc {source.extent, source.halfExtents.y * 2, color}, options), COM::OutChain(built));
-                    break;
-                default:
-                    break;
-            }
-            if (!result.HasValue())
-                return std::unexpected(result.error);
-            mesh = built;
-            if (!entities.Attach(entity, Components::OwnedMeshComponent {.meshAsset = binding->meshAsset, .mesh = mesh})) {
-                graphics.DestroyMesh(mesh);
-                return std::unexpected(COM::Error::InvalidArgument);
-            }
-        }
         if (!graphics.FindMesh(binding->meshAsset).HasValue()) {
-            graphics.RegisterMesh(binding->meshAsset, mesh);
+            auto& fallback = _fallbackMeshes[entity.Pack()];
+            if (fallback.generation != gen) {
+                fallback.mesh = {};
+            }
+            if (fallback.mesh.posBuffer == BufferID::Invalid) {
+                Mesh                        built {};
+                COM::Result<void>           result = COM::Error::InvalidArgument;
+                const COM::MeshBuildOptions options {.buildBLAS = _buildBLAS};
+                const FVec4                 color = it->second.baseColor;
+                switch (source.shape) {
+                    case Scene::ShapeKind::Box:
+                        result = graphics.CreateMesh(COM::InChain(COM::BoxMeshDesc {source.halfExtents, color}, options), COM::OutChain(built));
+                        break;
+                    case Scene::ShapeKind::Plane:
+                        result = graphics.CreateMesh(COM::InChain(COM::PlaneMeshDesc {source.extent, color}, options), COM::OutChain(built));
+                        break;
+                    case Scene::ShapeKind::Sphere:
+                        result = graphics.CreateMesh(COM::InChain(COM::SphereMeshDesc {source.extent, color}, options), COM::OutChain(built));
+                        break;
+                    case Scene::ShapeKind::Cylinder:
+                        result = graphics.CreateMesh(
+                            COM::InChain(COM::CylinderMeshDesc {source.extent, source.halfExtents.y * 2, color}, options), COM::OutChain(built)
+                        );
+                        break;
+                    case Scene::ShapeKind::Cone:
+                        result =
+                            graphics.CreateMesh(COM::InChain(COM::ConeMeshDesc {source.extent, source.halfExtents.y * 2, color}, options), COM::OutChain(built));
+                        break;
+                    default:
+                        break;
+                }
+                if (!result.HasValue())
+                    return std::unexpected(result.error);
+                fallback = {.assetID = binding->meshAsset, .mesh = built, .generation = gen};
+            }
+            graphics.RegisterMesh(binding->meshAsset, fallback.mesh);
         }
         if (!material.HasValue()) {
             const auto& saved = it->second;
@@ -378,6 +399,7 @@ void Session::Stop(COM::IEngine& engine) {
     if (auto pipeline = COM::Ref<COM::IFramePipeline>::Adopt(engine.Query<COM::IFramePipeline>()); pipeline && pipeline->FramePending())
         (void) pipeline->CancelFrame();
     engine.Graphics()->SetViewport(_previousViewport);
+    ReleaseFallbackMeshes(engine);
     _started = false;
     _materials.clear();
     _engine   = {};

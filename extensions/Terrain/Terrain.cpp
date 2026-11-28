@@ -20,33 +20,35 @@ struct System::Impl {
         CreateInfo info;
         AssetID    meshID;
         MaterialID materialID;
+        Mesh       mesh {};
+        uint64_t   deviceGeneration = 0;
     };
     COM::Ref<COM::IEngine> engine;
     std::vector<Tile>      tiles;
-    auto                   Refresh(Tile& tile) -> std::expected<void, ErrorCode> {
-        auto&       entities = *engine->Entities();
-        auto&       graphics = *engine->Graphics();
-        const auto* owner    = entities.Get<Components::OwnedMeshComponent>(tile.entity);
-        // Ownership is scene-side, never duplicated by this host. Recovery
-        // invalidates the owning component; a mere cache clear does not.
-        Mesh mesh     = owner ? owner->mesh : Mesh {};
-        bool uploaded = false;
-        if (mesh.posBuffer == BufferID::Invalid) {
+    void                   ReleaseMesh(Tile& tile) {
+        if (engine && tile.mesh.posBuffer != BufferID::Invalid && tile.deviceGeneration == engine->DeviceGeneration()) {
+            auto& graphics = *engine->Graphics();
+            graphics.UnregisterMesh(tile.meshID);
+            graphics.DestroyMesh(tile.mesh);
+        }
+        tile.mesh = {};
+    }
+    auto Refresh(Tile& tile) -> std::expected<void, ErrorCode> {
+        auto&          entities = *engine->Entities();
+        auto&          graphics = *engine->Graphics();
+        const uint64_t gen      = engine->DeviceGeneration();
+        if (tile.deviceGeneration != gen) {
+            tile.mesh = {};
+        }
+        if (tile.mesh.posBuffer == BufferID::Invalid) {
             const auto& g     = tile.geometry;
             const auto  built = graphics.UploadMesh({.positions = g.positions, .tangentFrames = g.frames, .surfaces = g.surfaces}, tile.info.buildBLAS);
             if (!built.HasValue())
                 return std::unexpected(built.error);
-            mesh     = built.value;
-            uploaded = true;
+            tile.mesh             = built.value;
+            tile.deviceGeneration = gen;
         }
-        // Attaching an owning engine component releases its predecessor and
-        // unregisters that predecessor's asset ID. Publish only AFTER ownership
-        // replacement, otherwise recovery erases the mesh we just registered.
-        if (uploaded && !entities.Attach(tile.entity, Components::OwnedMeshComponent {.meshAsset = tile.meshID, .mesh = mesh})) {
-            graphics.DestroyMesh(mesh);
-            return std::unexpected(COM::Error::InvalidArgument);
-        }
-        graphics.RegisterMesh(tile.meshID, mesh);
+        graphics.RegisterMesh(tile.meshID, tile.mesh);
         const auto* config    = entities.Get<TileComponent>(tile.entity);
         const float roughness = config ? config->roughness : tile.info.roughness;
         const float metallic  = config ? config->metallic : tile.info.metallic;
@@ -118,6 +120,8 @@ auto System::Create(Geometry geometry, const CreateInfo& info) -> std::expected<
         .materialID = HashAssetID("host_terrain_mat_" + identity)
     };
     const auto fail = [&](ErrorCode error) -> std::expected<Entity, ErrorCode> {
+        _impl->ReleaseMesh(tile);
+        engine.Graphics()->UnregisterMaterial(tile.materialID);
         entities.Despawn(entity);
         return std::unexpected(error);
     };
@@ -146,7 +150,14 @@ auto System::BeforeRender(COM::IEngine& engine, float) -> std::expected<void, Er
     if (!_impl || _impl->engine.Get() != &engine)
         return std::unexpected(Error::NotStarted);
     auto& entities = *engine.Entities();
-    std::erase_if(_impl->tiles, [&](const auto& tile) { return !entities.IsAlive(tile.entity) || entities.Get<Components::PendingDestroy>(tile.entity); });
+    auto& graphics = *engine.Graphics();
+    std::erase_if(_impl->tiles, [&](auto& tile) {
+        if (entities.IsAlive(tile.entity) && !entities.Get<Components::PendingDestroy>(tile.entity))
+            return false;
+        _impl->ReleaseMesh(tile);
+        graphics.UnregisterMaterial(tile.materialID);
+        return true;
+    });
     for (auto& tile: _impl->tiles)
         if (auto refreshed = _impl->Refresh(tile); !refreshed)
             return refreshed;
@@ -183,9 +194,12 @@ void System::Remove(Entity entity) {
     if (!_impl || !_impl->engine)
         return;
     auto& entities = *_impl->engine->Entities();
-    std::erase_if(_impl->tiles, [&](const auto& tile) {
+    auto& graphics = *_impl->engine->Graphics();
+    std::erase_if(_impl->tiles, [&](auto& tile) {
         if (tile.entity != entity)
             return false;
+        _impl->ReleaseMesh(tile);
+        graphics.UnregisterMaterial(tile.materialID);
         entities.Despawn(entity);
         return true;
     });
@@ -193,9 +207,15 @@ void System::Remove(Entity entity) {
 void System::Clear() {
     if (!_impl)
         return;
-    if (_impl->engine)
-        for (const auto& tile: _impl->tiles)
-            _impl->engine->Entities()->Despawn(tile.entity);
+    if (_impl->engine) {
+        auto& entities = *_impl->engine->Entities();
+        auto& graphics = *_impl->engine->Graphics();
+        for (auto& tile: _impl->tiles) {
+            _impl->ReleaseMesh(tile);
+            graphics.UnregisterMaterial(tile.materialID);
+            entities.Despawn(tile.entity);
+        }
+    }
     _impl->tiles.clear();
     _impl->engine = {};
 }

@@ -153,8 +153,13 @@ const std::array<ZHLN::FVec3, 5> kCenters {
     if (!oneSided) return std::unexpected(NegativeScaleError::ResourceCreationFailed);
     rc.RegisterMaterial(oneSidedID, *oneSided);
     bool hasDoubleSided = false;
+    ZHLN::Mesh mesh {};
     ZHLN::defer _([&] {
-        engine->ClearScene(); // Releases the sole owner of the mesh before unregistering the materials.
+        engine->ClearScene();
+        if (mesh.posBuffer != ZHLN::BufferID::Invalid) {
+            rc.UnregisterMesh(meshID);
+            rc.DestroyMesh(mesh);
+        }
         rc.UnregisterMaterial(oneSidedID);
         if (hasDoubleSided) rc.UnregisterMaterial(doubleSidedID);
     });
@@ -165,9 +170,10 @@ const std::array<ZHLN::FVec3, 5> kCenters {
     rc.RegisterMaterial(doubleSidedID, *doubleSided);
     hasDoubleSided = true;
 
-    ZHLN::Mesh mesh = MakePanel(rc);
+    mesh = MakePanel(rc);
     if (!Complete(mesh)) {
         rc.DestroyMesh(mesh);
+        mesh = {};
         return std::unexpected(NegativeScaleError::ResourceCreationFailed);
     }
     rc.RegisterMesh(meshID, mesh);
@@ -180,7 +186,7 @@ const std::array<ZHLN::FVec3, 5> kCenters {
         const auto rotation = i == 2 ? ZHLN::Quat::FromAxisAngle(ZHLN::FVec3::UnitY(), ZHLN::RadF{std::numbers::pi_v<float>}) : ZHLN::Quat::Identity();
         const ZHLN::FVec3 scale{mirrored ? -1.0f : 1.0f, 1.0f, 1.0f};
         const auto world = ZHLN::ComposeTransform(kCenters[i], rotation, scale);
-        const ZHLN::Entity e = reg.Spawn(
+        (void)reg.Spawn(
             ZHLN::Components::TransformComponent {.position = kCenters[i], .rotation = rotation, .scale = scale},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
             ZHLN::Components::MeshComponent {
@@ -189,9 +195,6 @@ const std::array<ZHLN::FVec3, 5> kCenters {
                 .cullRadius = 0.65f,
             }
         );
-        if (i == 0) { // Other instances only borrow the registered mesh.
-            engine->Entities()->Attach<ZHLN::Components::OwnedMeshComponent>(e, {.meshAsset = meshID, .mesh = mesh});
-        }
     }
 
     ZHLN::Test::Headless::TickFrames(*engine, 6);

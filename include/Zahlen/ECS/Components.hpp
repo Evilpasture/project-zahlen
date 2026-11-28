@@ -3,7 +3,6 @@
 
 #pragma once
 #include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/String.hpp>
@@ -74,21 +73,6 @@ struct Components {
         ZHLN::FVec3 localCenter   = {};
         DrawFlags    flags         = DrawFlags::None;
         int32_t      nodeIndex     = -1;
-    };
-
-    // Scene-owned buffers for a generated mesh. MeshComponent only references
-    // its AssetID; Engine scene cleanup releases these buffers on despawn or
-    // ClearScene. Use SceneResources::Attach/Detach for direct replacement or
-    // removal. Cached model parts belong to AssetManager, not this component.
-    struct OwnedMeshComponent {
-        enum class Shape : uint8_t { None, Box, Plane, Sphere, Cylinder, Cone };
-
-        AssetID      meshAsset  = InvalidAssetID;
-        Mesh         mesh       = {};
-        Shape        shape      = Shape::None;
-        FVec3    dimensions = FVec3::Zero(); // box: half extents; others: radius/extent, height
-        ZHLN::FVec4 color      = {1.0f, 1.0f, 1.0f, 1.0f};
-        bool         buildBLAS  = true; // retained across explicit renderer recreation
     };
 
     struct SkeletalMeshComponent {
@@ -330,12 +314,12 @@ struct SceneSourceComponent {
         float         metallic  = 0.0f;
     };
 
-    struct CSGComponent {
-        struct Element {
-            CSGOperation operation;
-            Entity       operandEntity;
-        };
-        ZHLN::Array<Element> modifiers;
+    // Attached to a cutter entity (typically DrawFlags::Hidden) that applies
+    // a boolean CSG operation against `target` using this entity's own
+    // MeshComponent / WorldTransformComponent / SkeletalMeshComponent.
+    struct CSGCutterComponent {
+        Entity       target    = Entity::Null();
+        CSGOperation operation = CSGOperation::Difference;
     };
 
     enum class VolumetricVolumeType : uint32_t { Box = 0, Sphere = 1 };

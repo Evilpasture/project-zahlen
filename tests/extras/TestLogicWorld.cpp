@@ -89,10 +89,13 @@ struct LogicWorldSuite {
             auto*      e      = (*made)->Entities();
             auto       entity = e->CreateEntity();
             const auto name   = COM::IEntities::ComponentName<Components::DynamicBodyComponent>();
-            ExpectTrue(e->AttachEngineRaw(entity, name, sizeof(Components::DynamicBodyComponent), alignof(Components::DynamicBodyComponent), 0) == nullptr);
-            ExpectTrue(e->AttachRaw(entity, name, sizeof(Components::DynamicBodyComponent), alignof(Components::DynamicBodyComponent)) == nullptr);
-            ExpectTrue(e->Attach(entity, Components::OwnedMeshComponent {}) == nullptr);
-            auto* value = static_cast<uint64_t*>(e->AttachRaw(entity, "bench.counter", 8, 8));
+            ExpectTrue(e->AttachRaw(entity, name, sizeof(Components::DynamicBodyComponent), alignof(Components::DynamicBodyComponent), 0) == nullptr);
+            ExpectTrue(e->AttachRaw(entity, "DynamicBodyComponent", sizeof(Components::DynamicBodyComponent), alignof(Components::DynamicBodyComponent),
+                                    Reflect::LayoutHash<Components::DynamicBodyComponent>()) == nullptr);
+            ExpectTrue(e->Attach(entity, Components::DecalComponent {}) == nullptr);
+            ExpectTrue(e->Attach(entity, Components::CSGCutterComponent {}) == nullptr);
+            ExpectTrue(e->Attach(entity, Components::EnvironmentMapComponent {}) == nullptr);
+            auto* value = static_cast<uint64_t*>(e->AttachRaw(entity, "bench.counter", 8, 8, 0));
             if (ExpectTrue(value != nullptr))
                 *value = 42;
             auto* fetched = static_cast<uint64_t*>(e->GetRaw(entity, "bench.counter"));
@@ -102,6 +105,46 @@ struct LogicWorldSuite {
             ExpectTrue(e->DetachRaw(entity, "bench.counter"));
             (*made)->Clear();
             ExpectTrue(!e->IsAlive(entity));
+            return {};
+        }
+        std::expected<void, ErrorCode> per_world_dynamic_schema_is_isolated_across_worlds() {
+            constexpr std::string_view kSharedName = "logic_world.isolated_dynamic";
+            {
+                auto worldA = COM::CreateLogicWorld();
+                if (!worldA)
+                    return std::unexpected(worldA.error());
+                auto*      e  = (*worldA)->Entities();
+                const auto id = e->CreateEntity();
+                auto*      p  = static_cast<uint64_t*>(e->AttachRaw(id, kSharedName, sizeof(uint64_t), alignof(uint64_t), 0x1111ULL));
+                if (!ExpectTrue(p != nullptr))
+                    return {};
+                *p = 0xCAFEBABEULL;
+                // Same world rejects conflicting layout for the same name.
+                ExpectTrue(e->AttachRaw(id, kSharedName, 32, 8, 0x2222ULL) == nullptr);
+                auto* got = static_cast<uint64_t*>(e->GetRaw(id, kSharedName));
+                if (ExpectTrue(got != nullptr))
+                    ExpectEq(*got, uint64_t(0xCAFEBABEULL));
+            }
+            {
+                auto worldB = COM::CreateLogicWorld();
+                if (!worldB)
+                    return std::unexpected(worldB.error());
+                auto*      e  = (*worldB)->Entities();
+                const auto id = e->CreateEntity();
+                // Separate world owns an independent Registry schema and accepts
+                // a different size/layoutHash under the same dynamic name.
+                auto* p = static_cast<uint64_t*>(e->AttachRaw(id, kSharedName, 32, 8, 0x2222ULL));
+                if (!ExpectTrue(p != nullptr))
+                    return {};
+                p[0] = 0x12345678ULL;
+                p[3] = 0x87654321ULL;
+                ExpectTrue(e->AttachRaw(id, kSharedName, sizeof(uint64_t), alignof(uint64_t), 0x1111ULL) == nullptr);
+                auto* got = static_cast<uint64_t*>(e->GetRaw(id, kSharedName));
+                if (ExpectTrue(got != nullptr)) {
+                    ExpectEq(got[0], uint64_t(0x12345678ULL));
+                    ExpectEq(got[3], uint64_t(0x87654321ULL));
+                }
+            }
             return {};
         }
         std::expected<void, ErrorCode> real_benchmark_preserves_sizing_sync_history_reset_and_reinitialization() {

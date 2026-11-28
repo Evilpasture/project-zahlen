@@ -93,10 +93,37 @@ consteval auto LocalTypeSpelling(std::meta::info info) -> std::string_view {
     return display.substr(start);
 }
 
+consteval auto HasParent(std::meta::info entity) -> bool {
+#if defined(__GNUC__) && !defined(__clang__)
+    return std::meta::has_parent(entity);
+#else
+    // Bloomberg clang-p2996 omits std::meta::has_parent and
+    // std::meta::has_c_language_linkage. Stop at the global namespace, non-tag
+    // types, and non-member functions/variables (which may have C linkage,
+    // including main).
+    if (entity == std::meta::info {} || entity == ^^::) {
+        return false;
+    }
+    if (std::meta::is_type(entity)) {
+        const std::meta::info bare = std::meta::dealias(entity);
+        return std::meta::is_class_type(bare) || std::meta::is_union_type(bare) || std::meta::is_enum_type(bare);
+    }
+    if (std::meta::is_function(entity) || std::meta::is_variable(entity)) {
+        return std::meta::is_class_member(entity);
+    }
+    return std::meta::is_namespace(entity) || std::meta::is_template(entity) || std::meta::is_enumerator(entity) ||
+           std::meta::is_class_member(entity) || std::meta::is_namespace_member(entity);
+#endif
+}
+
 consteval auto QualifiedTypeSpelling(std::meta::info info) -> std::string {
     std::vector<std::string_view> parts;
-    for (auto current = info; current != ^^::; current = std::meta::parent_of(current)) {
+    for (auto current = info; current != ^^::;) {
         parts.push_back(LocalTypeSpelling(current));
+        if (!HasParent(current)) {
+            break;
+        }
+        current = std::meta::parent_of(current);
     }
     std::string name;
     for (size_t i = parts.size(); i != 0; --i) {

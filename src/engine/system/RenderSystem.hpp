@@ -28,9 +28,9 @@ class RenderSystem {
     using RenderFrameQuery = ECS::Query<
         const Components::CameraComponent, const Components::MainCameraTagComponent,
         const Components::EnvironmentMapComponent, const Components::MeshComponent,
-        const Components::OwnedMeshComponent, Components::SkeletalMeshComponent&, const Components::MorphTargetComponent,
+        Components::SkeletalMeshComponent&, const Components::MorphTargetComponent,
         const Components::WorldTransformComponent, const Components::TransformComponent, const Components::PBRComponent,
-        const Components::CSGComponent, const Components::AmbientCubeComponent, const Components::LightComponent,
+        const Components::CSGCutterComponent, const Components::AmbientCubeComponent, const Components::LightComponent,
         const Components::SunTagComponent, const Components::EnvironmentSunTagComponent,
         const Components::ParticleEmitterComponent, const Components::MeshParticleEmitterComponent>;
 

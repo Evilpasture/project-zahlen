@@ -15,7 +15,7 @@ inline constexpr bool IsPhysicsBodyComponent =
 // Hosts may inspect them, but reflective edits must not overwrite handles.
 template <typename T>
 inline constexpr bool OwnsExternalResource = IsPhysicsBodyComponent<T> || std::is_same_v<T, Components::RagdollComponent> ||
-                                             std::is_same_v<T, Components::AudioSourceComponent> || std::is_same_v<T, Components::OwnedMeshComponent> ||
+                                             std::is_same_v<T, Components::AudioSourceComponent> ||
                                              std::is_same_v<T, Components::SkeletalMeshComponent>;
 template <typename T>
 inline constexpr bool ReadOnlyReflective = OwnsExternalResource<T> || std::is_same_v<T, Components::CharacterMotorStateComponent>;

@@ -194,11 +194,15 @@ auto RunGeometryTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> s
                 ZHLN::PrefabFactory::SpawnParams {.position = {posX, 0.5, posZ}, .createPhysics = false, .materialOverride = (r % 2 == 0) ? *goldMat : *blueMat});
             // A box has three vertex streams and three meshlet buffers. Fail
             // immediately rather than timing a scene with invalid geometry.
-            const auto owner = reg.Get<ZHLN::Components::OwnedMeshComponent>(box);
-            if (!ZHLN::Test::ExpectTrue((owner != nullptr))) {
+            const auto meshComp = reg.Get<ZHLN::Components::MeshComponent>(box);
+            if (!ZHLN::Test::ExpectTrue((meshComp != nullptr))) {
                 return std::unexpected(RenderPerfTestError::GeometryThroughputFailed);
             }
-            const auto& mesh = owner->mesh;
+            const auto meshOpt = rc.FindMesh(meshComp->meshAsset);
+            if (!ZHLN::Test::ExpectTrue(meshOpt.HasValue())) {
+                return std::unexpected(RenderPerfTestError::GeometryThroughputFailed);
+            }
+            const auto& mesh = meshOpt.value;
             if (!ZHLN::Test::ExpectNe(mesh.posBuffer, ZHLN::BufferID::Invalid) ||
                 !ZHLN::Test::ExpectNe(mesh.tangentFrameBuffer, ZHLN::BufferID::Invalid) ||
                 !ZHLN::Test::ExpectNe(mesh.surfaceBuffer, ZHLN::BufferID::Invalid) ||

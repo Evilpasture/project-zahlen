@@ -28,6 +28,7 @@ struct Frame;
 namespace ZHLN::ECS {
 
 class Registry;
+class SparseSet;
 class EntityCommandBuffer;
 
 template <typename Services>
@@ -38,14 +39,6 @@ class SystemGraph;
 // that ask for a service cannot be added to it -- that is a compile error, not a
 // null pointer at run time.
 struct NoServices {};
-
-namespace TemplatedDetail {
-
-// The family id of a Local<T> slot. Locals are not components and are never
-// stored in the registry; the id exists so a node's state can be found by type
-// with the same by-family lookup the scheduler uses for services.
-template <typename T>
-struct LocalToken {};
 
 struct LocalSlotDesc;
 
@@ -58,8 +51,6 @@ struct LocalStateView {
     size_t               count = 0;
 };
 
-} // namespace TemplatedDetail
-
 // What the executor hands a system. Two references and a frame: the registry the
 // graph runs against, the services the graph was built with, and this
 // execution's clock and scratch. No engine pointers, no null service slots.
@@ -68,17 +59,22 @@ struct LocalStateView {
 // invocation, and it is the only way a system reaches state that belongs to it
 // rather than to the world.
 //
+// `querySets` is an optional node-owned cache of resolved SparseSet* pointers
+// populated by SystemGraph when dispatching a node (nullptr for sequential
+// direct invocations).
+//
 // The `typedef` names the services type so a resolver can ask, of the carrier it
 // was handed, whether those services provide what it was asked to resolve.
 template <typename ServicesT>
 struct Carrier {
     using Services = ServicesT;
 
-    ECS::Registry&                  registry;
-    ServicesT&                      services;
-    const ZHLN::Frame&              frame;
-    TemplatedDetail::LocalStateView local {};
-    EntityCommandBuffer*            ecb = nullptr;
+    ECS::Registry&       registry;
+    ServicesT&           services;
+    const ZHLN::Frame&   frame;
+    LocalStateView       local {};
+    EntityCommandBuffer* ecb       = nullptr;
+    SparseSet* const*    querySets = nullptr;
 };
 
 } // namespace ZHLN::ECS

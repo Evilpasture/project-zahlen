@@ -157,30 +157,41 @@ struct RenderPipelinesTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return {};
             }
-            auto& rc  = *engine->Graphics();
-            auto& reg = *engine->Entities();
+            auto& rc     = *engine->Graphics();
+            auto& reg    = *engine->Entities();
+            auto& assets = *engine->Assets();
 
-            const auto entity = engine->Assets()->SpawnBox(ZHLN::FVec3 {0.5f, 0.5f, 0.5f});
-            const auto owner  = reg.Get<ZHLN::Components::OwnedMeshComponent>(entity);
-            if (!ZHLN::Test::ExpectTrue(owner != nullptr && owner->mesh.posBuffer != ZHLN::BufferID::Invalid)) {
+            const auto entity   = assets.SpawnBox(ZHLN::FVec3 {0.5f, 0.5f, 0.5f});
+            const auto second   = assets.SpawnBox(ZHLN::FVec3 {0.5f, 0.5f, 0.5f});
+            const auto meshComp = reg.Get<ZHLN::Components::MeshComponent>(entity);
+            const auto secComp  = reg.Get<ZHLN::Components::MeshComponent>(second);
+            if (!ZHLN::Test::ExpectTrue(meshComp != nullptr && secComp != nullptr)) {
                 return {};
             }
-            const auto id     = owner->meshAsset;
-            const auto handle = owner->mesh.posBuffer;
+            // Identical procedural primitives share one cached AssetID.
+            ZHLN::Test::ExpectEq(meshComp->meshAsset, secComp->meshAsset);
+            const auto id      = meshComp->meshAsset;
+            const auto initial = rc.GetMesh(id);
+            if (!ZHLN::Test::ExpectTrue(initial.HasValue() && initial->posBuffer != ZHLN::BufferID::Invalid)) {
+                return {};
+            }
+            const auto handle = initial->posBuffer;
 
             rc.UnregisterMesh(id);
             ZHLN::Test::ExpectFalse(rc.GetMesh(id).HasValue());
-            rc.RegisterMesh(id, owner->mesh);
+            rc.RegisterMesh(id, *initial);
             const auto rebound = rc.GetMesh(id);
             ZHLN::Test::ExpectTrue(rebound.HasValue());
             if (rebound) {
                 ZHLN::Test::ExpectEq(rebound->posBuffer, handle);
             }
 
-            ZHLN::Test::ExpectTrue(reg.Detach<ZHLN::Components::OwnedMeshComponent>(entity));
-            ZHLN::Test::ExpectFalse(rc.GetMesh(id).HasValue());
             reg.Despawn(entity);
+            reg.Despawn(second);
             ZHLN::Test::Headless::TickFrames(*engine, 1);
+            ZHLN::Test::ExpectFalse(reg.IsAlive(entity));
+            // Procedural mesh remains cached in AssetLibrary until ClearCache().
+            ZHLN::Test::ExpectTrue(rc.GetMesh(id).HasValue());
 
             const auto scratchRes = rc.CreateBuffer(ZHLN::COM::InChain(ZHLN::COM::BufferCreateInfo {
                 .usage  = ZHLN::BufferUsage::SkinScratch,
@@ -200,21 +211,13 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::Headless::TickFrames(*engine, 1);
             }
 
-            const auto plane      = engine->Assets()->SpawnPlane(2.0f);
-            const auto planeOwner = reg.Get<ZHLN::Components::OwnedMeshComponent>(plane);
-            if (ZHLN::Test::ExpectTrue(planeOwner != nullptr)) {
-                const auto planeID = planeOwner->meshAsset;
-                reg.Despawn(plane);
-                ZHLN::Test::Headless::TickFrames(*engine, 1);
-                ZHLN::Test::ExpectFalse(reg.IsAlive(plane));
-                ZHLN::Test::ExpectFalse(rc.GetMesh(planeID).HasValue());
-            }
-
-            const auto sphere      = engine->Assets()->SpawnSphere(0.5f);
-            const auto sphereOwner = reg.Get<ZHLN::Components::OwnedMeshComponent>(sphere);
-            if (ZHLN::Test::ExpectTrue(sphereOwner != nullptr)) {
-                const auto sphereID = sphereOwner->meshAsset;
+            const auto sphere     = assets.SpawnSphere(0.5f);
+            const auto sphereMesh = reg.Get<ZHLN::Components::MeshComponent>(sphere);
+            if (ZHLN::Test::ExpectTrue(sphereMesh != nullptr)) {
+                const auto sphereID = sphereMesh->meshAsset;
                 engine->ClearScene();
+                assets.ClearCache();
+                ZHLN::Test::ExpectFalse(rc.GetMesh(id).HasValue());
                 ZHLN::Test::ExpectFalse(rc.GetMesh(sphereID).HasValue());
             }
             return {};
@@ -230,15 +233,16 @@ struct RenderPipelinesTestSuite {
             );
             auto camera = reg.GetSingleton<ZHLN::Components::CameraComponent>();
             auto mesh   = reg.Get<ZHLN::Components::MeshComponent>(box);
-            auto owner  = reg.Get<ZHLN::Components::OwnedMeshComponent>(box);
-            if (!ZHLN::Test::ExpectTrue(camera && mesh && owner)) return {};
+            if (!ZHLN::Test::ExpectTrue(camera && mesh)) return {};
+            const auto initialMesh = rc.GetMesh(mesh->meshAsset);
+            if (!ZHLN::Test::ExpectTrue(initialMesh.HasValue())) return {};
             reg.PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                 c.camera.position = {0.0f, 5.0f, 10.0f};
                 c.camera.yaw      = ZHLN::DegF {-90.0f};
                 c.camera.pitch    = ZHLN::DegF {-15.0f};
             });
-            const auto ownerMesh = owner->mesh;
-            const auto id        = owner->meshAsset;
+            const auto ownerMesh = *initialMesh;
+            const auto id        = mesh->meshAsset;
             ZHLN::Test::Headless::TickFrames(*engine, 2);
             const auto cstats = engine->State()->CullingStats();
             if (!ZHLN::Test::ExpectTrue(cstats.TotalObjects > cstats.CulledObjects)) return {};

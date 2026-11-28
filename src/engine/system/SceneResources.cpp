@@ -13,32 +13,34 @@
 namespace ZHLN::SceneResources {
 
 void Release(PhysicsContext& physics, Components::StaticBodyComponent& component) {
-    physics.DestroyBody(std::exchange(component.bodyID, Physics::StaticBodyID::Null()));
+    if (const auto id = std::exchange(component.bodyID, Physics::StaticBodyID::Null()); id != Physics::StaticBodyID::Null()) {
+        physics.DestroyBody(id);
+    }
 }
 
 void Release(PhysicsContext& physics, Components::KinematicBodyComponent& component) {
-    physics.DestroyBody(std::exchange(component.bodyID, Physics::KinematicBodyID::Null()));
+    if (const auto id = std::exchange(component.bodyID, Physics::KinematicBodyID::Null()); id != Physics::KinematicBodyID::Null()) {
+        physics.DestroyBody(id);
+    }
 }
 
 void Release(PhysicsContext& physics, Components::DynamicBodyComponent& component) {
-    physics.DestroyBody(std::exchange(component.bodyID, Physics::DynamicBodyID::Null()));
+    if (const auto id = std::exchange(component.bodyID, Physics::DynamicBodyID::Null()); id != Physics::DynamicBodyID::Null()) {
+        physics.DestroyBody(id);
+    }
 }
 
 void Release(PhysicsContext& physics, Components::CharacterBodyComponent& component) {
-    physics.DestroyBody(std::exchange(component.bodyID, Physics::CharacterID::Null()));
+    if (const auto id = std::exchange(component.bodyID, Physics::CharacterID::Null()); id != Physics::CharacterID::Null()) {
+        physics.DestroyBody(id);
+    }
 }
 
 void Release(PhysicsContext& physics, Components::RagdollComponent& component) {
-    physics.DestroyRagdoll(std::exchange(component.ragdollID, Physics::RagdollID::Invalid));
     component.isAddedToPhysics = false;
-}
-
-void Release(RenderContext& render, Components::OwnedMeshComponent& component) {
-    if (component.meshAsset != InvalidAssetID) {
-        render.UnregisterGPUMesh(component.meshAsset);
+    if (const auto id = std::exchange(component.ragdollID, Physics::RagdollID::Invalid); id != Physics::RagdollID::Invalid) {
+        physics.DestroyRagdoll(id);
     }
-    render.DestroyMesh(std::exchange(component.mesh, Mesh {}));
-    component.meshAsset = InvalidAssetID;
 }
 
 void Release(Engine& engine, Components::StaticBodyComponent& component) {
@@ -58,21 +60,24 @@ void Release(Engine& engine, Components::CharacterBodyComponent& component) {
 }
 
 void Release(Engine& engine, Components::RagdollComponent& component) {
-    // Drop per-ragdoll CPU state before ragdollID is exchanged to Invalid.
-    engine.GetWorld().GetArticulationContext().RemoveJointState(component.ragdollID);
-    Release(engine.Physics(), component);
+    // Drop per-ragdoll CPU state before releasing the physics ragdoll; guard on
+    // Invalid so repeated retirement (e.g. SceneCleanup followed by Registry::Clear)
+    // is a guaranteed no-op.
+    component.isAddedToPhysics = false;
+    if (const auto id = std::exchange(component.ragdollID, Physics::RagdollID::Invalid); id != Physics::RagdollID::Invalid) {
+        engine.GetWorld().GetArticulationContext().RemoveJointState(id);
+        engine.Physics().DestroyRagdoll(id);
+    }
 }
 
 void Release(AudioContext& audio, Components::AudioSourceComponent& component) {
-    audio.StopVoice(std::exchange(component.voiceID, VoiceID::Invalid), component.fadeOut);
+    if (const auto id = std::exchange(component.voiceID, VoiceID::Invalid); id != VoiceID::Invalid) {
+        audio.StopVoice(id, component.fadeOut);
+    }
 }
 
 void Release(Engine& engine, Components::AudioSourceComponent& component) {
     Release(engine.Audio(), component);
-}
-
-void Release(Engine& engine, Components::OwnedMeshComponent& component) {
-    Release(engine.Render(), component);
 }
 
 void Release(Engine& engine, Components::SkeletalMeshComponent& component) {
@@ -81,14 +86,16 @@ void Release(Engine& engine, Components::SkeletalMeshComponent& component) {
         component.jointOffset = 0;
         component.jointCount  = 0;
     }
-    engine.Render().DestroyBuffer(std::exchange(component.skinnedScratch, BufferID::Invalid));
+    if (const auto scratch = std::exchange(component.skinnedScratch, BufferID::Invalid); scratch != BufferID::Invalid) {
+        engine.Render().DestroyBuffer(scratch);
+    }
     component.scratchVertexCount = 0;
 }
 
 void Release(Engine& engine, Components::MorphTargetComponent& component) {
     if (component.morphDeltaCount > 0) {
         engine.Render().FreeMorphDeltas(component.offset, component.morphDeltaCount);
-        component.offset         = 0;
+        component.offset          = 0;
         component.morphDeltaCount = 0;
     }
 }

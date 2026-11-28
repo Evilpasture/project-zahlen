@@ -2,25 +2,39 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <ecs/EntityCommandBuffer.hpp>
-#include <Zahlen/Core/HashMap.hpp>
+#include <algorithm>
+#include <array>
+#include <vector>
 
 namespace ZHLN::ECS {
 
 void EntityCommandBuffer::Playback() {
-    ZHLN::HashMap<uint32_t, Entity> tempToRealMap;
+    constexpr size_t                    kStackTempLimit = 64;
+    std::array<Entity, kStackTempLimit> stackTemps {};
+    std::vector<Entity>                 heapTemps;
+    Entity*                             tempToReal = nullptr;
+
+    const size_t tempCount = _tempIndexCounter;
+    if (tempCount <= kStackTempLimit) {
+        std::fill_n(stackTemps.begin(), tempCount, Entity::Null());
+        tempToReal = stackTemps.data();
+    } else {
+        heapTemps.resize(tempCount, Entity::Null());
+        tempToReal = heapTemps.data();
+    }
 
     for (auto& cmd: _commands) {
         Entity target = cmd.entity;
 
-        if (target.generation == 0xFFFFFFFF) {
-            if (const auto realEntity = tempToRealMap.Find(target.index)) {
-                target = *realEntity;
-            }
+        if (target.generation == kTempGeneration && target.index < tempCount) {
+            target = tempToReal[target.index];
         }
 
         switch (cmd.type) {
             case CommandType::Create: {
-                tempToRealMap.Insert(cmd.entity.index, _registry->Create());
+                if (cmd.entity.index < tempCount) {
+                    tempToReal[cmd.entity.index] = _registry->Create();
+                }
                 break;
             }
             case CommandType::Destroy: {
@@ -37,8 +51,8 @@ void EntityCommandBuffer::Playback() {
                 }
                 if (cmd.destructor != nullptr && cmd.componentData != nullptr) {
                     cmd.destructor(cmd.componentData);
-                    cmd.componentData = nullptr;
                 }
+                cmd.componentData = nullptr;
                 break;
             }
             case CommandType::RemoveComponent: {
@@ -57,8 +71,8 @@ void EntityCommandBuffer::Reset() noexcept {
         if (cmd.type == CommandType::AddComponent && cmd.componentData != nullptr) {
             if (cmd.destructor != nullptr) {
                 cmd.destructor(cmd.componentData);
-                cmd.componentData = nullptr;
             }
+            cmd.componentData = nullptr;
         }
     }
     _commands.clear();
@@ -66,7 +80,7 @@ void EntityCommandBuffer::Reset() noexcept {
     // against is reclaimed in one store. Playback() nulls each payload it
     // consumed, which is why a Reset after one cannot destroy anything twice.
     _arena.Reset();
-    _tempIndexCounter = 0xF0000000;
+    _tempIndexCounter = 0;
 }
 
-}
+} // namespace ZHLN::ECS

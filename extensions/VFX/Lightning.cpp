@@ -22,6 +22,8 @@ struct System::Impl {
         GeneratedRibbon ribbon;
         AssetID         meshID;
         MaterialID      materialID;
+        Mesh            mesh {};
+        uint64_t        deviceGeneration = 0;
         FVec3           ground;
         BoltState       state;
     };
@@ -31,24 +33,23 @@ struct System::Impl {
     // Exposure is deliberately not a global write: independent hosts cannot
     // safely restore another host's settings. Flash uses owned light entities.
     auto Refresh(Bolt& bolt) -> std::expected<void, ErrorCode> {
-        auto&       entities = *engine->Entities();
-        auto&       graphics = *engine->Graphics();
-        const auto* owner    = entities.Get<Components::OwnedMeshComponent>(bolt.entity);
-        Mesh        mesh     = owner ? owner->mesh : Mesh {};
-        if (mesh.posBuffer == BufferID::Invalid) {
+        auto&          entities = *engine->Entities();
+        auto&          graphics = *engine->Graphics();
+        const uint64_t gen      = engine->DeviceGeneration();
+        if (bolt.deviceGeneration != gen) {
+            bolt.mesh = {};
+        }
+        if (bolt.mesh.posBuffer == BufferID::Invalid) {
             const auto& r     = bolt.ribbon;
             auto        built = graphics.UploadMesh({.positions = r.positions, .tangentFrames = r.frames, .surfaces = r.surfaces}, false);
             if (!built.HasValue())
                 return std::unexpected(built.error);
-            mesh = built.value;
-            if (!entities.Attach(bolt.entity, Components::OwnedMeshComponent {.meshAsset = bolt.meshID, .mesh = mesh})) {
-                graphics.DestroyMesh(mesh);
-                return std::unexpected(COM::Error::InvalidArgument);
-            }
+            bolt.mesh             = built.value;
+            bolt.deviceGeneration = gen;
         }
-        // Publish after replacing ownership (replacement unregisters old ID).
-        mesh.vertexCount = bolt.state.visibleVertices;
-        graphics.RegisterMesh(bolt.meshID, mesh);
+        Mesh published       = bolt.mesh;
+        published.vertexCount = bolt.state.visibleVertices;
+        graphics.RegisterMesh(bolt.meshID, published);
         auto material = graphics.FindMaterial(bolt.materialID);
         if (!material.HasValue()) {
             MaterialDesc desc  = MaterialDesc::Basic();
@@ -76,10 +77,16 @@ struct System::Impl {
     }
     void Release(Bolt& bolt) {
         auto& entities = *engine->Entities();
+        auto& graphics = *engine->Graphics();
+        if (bolt.mesh.posBuffer != BufferID::Invalid && bolt.deviceGeneration == engine->DeviceGeneration()) {
+            graphics.UnregisterMesh(bolt.meshID);
+            graphics.DestroyMesh(bolt.mesh);
+        }
+        bolt.mesh = {};
         entities.Despawn(bolt.flash);
         entities.Despawn(bolt.impact);
         entities.Despawn(bolt.entity);
-        engine->Graphics()->UnregisterMaterial(bolt.materialID);
+        graphics.UnregisterMaterial(bolt.materialID);
     }
 };
 System::System(): _impl(std::make_unique<Impl>()) {

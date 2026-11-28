@@ -33,6 +33,8 @@
 #include <render/Render.hpp>
 #include <render/SceneData.hpp>
 #include <span>
+#include <unordered_map>
+#include <vector>
 #include <window/PlatformHost.hpp>
 #include <window/Window.hpp>
 
@@ -159,16 +161,60 @@ void UploadPosePalettes(RenderContext& rc, PoseUploadQueue& poseUploads) {
 
 using MeshSubmitQuery = ECS::Query<
     const Components::MeshComponent,
-    const Components::OwnedMeshComponent,
     Components::SkeletalMeshComponent&,
     const Components::MorphTargetComponent,
     const Components::WorldTransformComponent,
     const Components::PBRComponent,
-    const Components::CSGComponent,
+    const Components::CSGCutterComponent,
     const Components::AmbientCubeComponent>;
 
-void SubmitVisibleMeshes(MeshSubmitQuery query, RenderContext& rc, std::span<const Entity> mainVisible, std::span<const Entity> shadowVisible) {
+[[nodiscard]] constexpr auto EntityKey(Entity e) noexcept -> uint64_t {
+    return (static_cast<uint64_t>(e.generation) << 32) | static_cast<uint64_t>(e.index);
+}
+
+void SubmitVisibleMeshes(
+    MeshSubmitQuery       query,
+    RenderContext&        rc,
+    const AssetManager&   assets,
+    std::span<const Entity> mainVisible,
+    std::span<const Entity> shadowVisible
+) {
     auto IsInList = [](std::span<const Entity> list, Entity e) -> bool { return std::ranges::find(list, e) != list.end(); };
+    auto ResolveMesh = [&](AssetID meshAsset) -> std::optional<Mesh> {
+        auto opt = rc.GetGPUMesh(meshAsset);
+        if (!opt.has_value()) {
+            // Explicit cache clears discard GPU lookups, not AssetManager-owned
+            // procedural buffers. Rebind the cached view without reallocating.
+            if (const auto cached = assets.FindProceduralMesh(meshAsset)) {
+                rc.RegisterGPUMesh(meshAsset, *cached);
+                opt = *cached;
+            }
+        }
+        return opt;
+    };
+    auto ResolveMaterial = [&](MaterialID matAsset) -> std::optional<Material> {
+        auto opt = rc.GetGPUMaterial(matAsset);
+        if (!opt.has_value()) {
+            if (const auto cached = assets.FindProceduralMaterial(matAsset)) {
+                rc.RegisterGPUMaterial(matAsset, *cached);
+                opt = *cached;
+            }
+        }
+        return opt;
+    };
+
+    struct CutterBinding {
+        Entity       cutter;
+        CSGOperation operation;
+    };
+    std::unordered_map<uint64_t, std::vector<CutterBinding>> csgCuttersByTarget;
+    if (const auto cutterEntities = query.Entities<Components::CSGCutterComponent>(); !cutterEntities.empty()) {
+        for (Entity cutterEnt: cutterEntities) {
+            if (const auto cutter = query.Get<Components::CSGCutterComponent>(cutterEnt); cutter && query.IsAlive(cutter->target)) {
+                csgCuttersByTarget[EntityKey(cutter->target)].push_back({.cutter = cutterEnt, .operation = cutter->operation});
+            }
+        }
+    }
 
     for (Entity e: query.Entities<Components::MeshComponent>()) {
         bool inMain   = IsInList(mainVisible, e);
@@ -183,17 +229,8 @@ void SubmitVisibleMeshes(MeshSubmitQuery query, RenderContext& rc, std::span<con
             continue;
         }
 
-        auto gpuMeshOpt = rc.GetGPUMesh(meshComp->meshAsset);
-        if (!gpuMeshOpt.has_value()) {
-            // Explicit cache clears discard lookups, not scene-owned buffers.
-            // Rebind the owner's view instead of allocating another mesh.
-            if (const auto owned = query.Get<Components::OwnedMeshComponent>(e);
-                owned && owned->meshAsset == meshComp->meshAsset && owned->mesh.posBuffer != BufferID::Invalid) {
-                rc.RegisterGPUMesh(meshComp->meshAsset, owned->mesh);
-                gpuMeshOpt = owned->mesh;
-            }
-        }
-        auto gpuMatOpt = rc.GetGPUMaterial(meshComp->materialAsset);
+        auto gpuMeshOpt = ResolveMesh(meshComp->meshAsset);
+        auto gpuMatOpt  = ResolveMaterial(meshComp->materialAsset);
         if (!gpuMeshOpt.has_value() || !gpuMatOpt.has_value()) {
             continue;
         }
@@ -249,7 +286,7 @@ void SubmitVisibleMeshes(MeshSubmitQuery query, RenderContext& rc, std::span<con
             metallic  = pbr->metallic;
         }
 
-        if (auto csg = query.Get<Components::CSGComponent>(e)) {
+        if (const auto csgIt = csgCuttersByTarget.find(EntityKey(e)); csgIt != csgCuttersByTarget.end()) {
             CSGDrawParams csgParams;
             csgParams.eyeParams = {
                 .transform           = worldMat,
@@ -266,14 +303,17 @@ void SubmitVisibleMeshes(MeshSubmitQuery query, RenderContext& rc, std::span<con
                 .metallic            = metallic
             };
 
-            for (const auto& mod: csg->modifiers) {
-                if (query.IsAlive(mod.operandEntity)) {
-                    if (auto cutMesh = query.Get<Components::MeshComponent>(mod.operandEntity)) {
-                        auto cutGpuMeshOpt = rc.GetGPUMesh(cutMesh->meshAsset);
-                        auto cutGpuMatOpt  = rc.GetGPUMaterial(cutMesh->materialAsset);
+            for (const auto& mod: csgIt->second) {
+                if (query.IsAlive(mod.cutter)) {
+                    if (auto cutMesh = query.Get<Components::MeshComponent>(mod.cutter)) {
+                        // Cutters typically carry DrawFlags::Hidden so they are
+                        // skipped by visibility culling above; rebind procedural
+                        // caches here too after ClearGPUCaches().
+                        auto cutGpuMeshOpt = ResolveMesh(cutMesh->meshAsset);
+                        auto cutGpuMatOpt  = ResolveMaterial(cutMesh->materialAsset);
                         if (cutGpuMeshOpt && cutGpuMatOpt) {
-                            auto cutSkelMesh   = query.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
-                            auto cutWorldTrans = query.Get<Components::WorldTransformComponent>(mod.operandEntity);
+                            auto cutSkelMesh   = query.Get<Components::SkeletalMeshComponent>(mod.cutter);
+                            auto cutWorldTrans = query.Get<Components::WorldTransformComponent>(mod.cutter);
                             auto cutWorldMat   = Mat4x4::Identity();
                             auto cutPrevMat    = Mat4x4::Identity();
                             if (cutWorldTrans) {
@@ -534,7 +574,7 @@ FrameOutcome<FrameSkipped>
     UploadPosePalettes(rc, poseUploads);
 
     if (physicsDrawMode == 0) {
-        SubmitVisibleMeshes(query.Project<MeshSubmitQuery>(), rc, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
+        SubmitVisibleMeshes(query.Project<MeshSubmitQuery>(), rc, engine.Assets(), engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
     }
 
     if (auto sim_res = gpuFrame.DispatchSimulations(sceneData, dt); !sim_res) {

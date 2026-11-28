@@ -77,14 +77,19 @@ struct LightningHostSuite {
             auto& gfx      = *engine->Graphics();
             float exposure = gfx.Settings().environment.ambientExposure;
             auto  binding  = *entities.Get<Components::MeshComponent>(*bolt);
-            auto  old      = *entities.Get<Components::OwnedMeshComponent>(*bolt);
+            auto  initial  = gfx.FindMesh(binding.meshAsset);
+            if (!ExpectTrue(initial.HasValue() && initial.value.posBuffer != BufferID::Invalid))
+                return {};
             ExpectTrue(host.BeforeRender(*engine.Get(), .02f).has_value());
             auto state = *entities.Get<Lightning::BoltState>(*bolt);
             ExpectTrue(state.visibleVertices > 0);
             gfx.UnregisterMesh(binding.meshAsset);
             gfx.UnregisterMaterial(binding.materialAsset);
             ExpectTrue(host.BeforeRender(*engine.Get(), 0).has_value());
-            ExpectEq(entities.Get<Components::OwnedMeshComponent>(*bolt)->mesh.posBuffer, old.mesh.posBuffer);
+            auto rebound = gfx.FindMesh(binding.meshAsset);
+            ExpectTrue(rebound.HasValue());
+            if (rebound.HasValue())
+                ExpectEq(rebound.value.posBuffer, initial.value.posBuffer);
             ExpectTrue(engine->RecreateGraphicsDevice().HasValue());
             ExpectTrue(host.BeforeRender(*engine.Get(), 0).has_value());
             ExpectTrue(gfx.FindMesh(binding.meshAsset).HasValue());

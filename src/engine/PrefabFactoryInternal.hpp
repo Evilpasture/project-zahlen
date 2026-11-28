@@ -49,9 +49,10 @@ auto CreateCylinderConfigured(Engine& engine, float radius, float height, const 
 auto CreateConeConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode>;
 
 // Engine's device-recovery barrier and internal spawners.
-void RebuildVulkanResources(RenderContext& gfx, ECS::Registry& registry);
+void RebuildVulkanResources(RenderContext& gfx, AssetManager& assets);
 auto CreateBoxInternal(
     RenderContext&                  gfx,
+    AssetManager&                   assets,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     ZHLN::FVec3                     halfExtents,
@@ -60,6 +61,7 @@ auto CreateBoxInternal(
 ) -> std::expected<Entity, ErrorCode>;
 auto CreateSphereInternal(
     RenderContext&                  gfx,
+    AssetManager&                   assets,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           radius,
@@ -68,6 +70,7 @@ auto CreateSphereInternal(
 ) -> std::expected<Entity, ErrorCode>;
 auto CreateCylinderInternal(
     RenderContext&                  gfx,
+    AssetManager&                   assets,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           radius,
@@ -77,6 +80,7 @@ auto CreateCylinderInternal(
 ) -> std::expected<Entity, ErrorCode>;
 auto CreateConeInternal(
     RenderContext&                  gfx,
+    AssetManager&                   assets,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           radius,
@@ -86,6 +90,7 @@ auto CreateConeInternal(
 ) -> std::expected<Entity, ErrorCode>;
 auto CreatePlaneInternal(
     RenderContext&                  gfx,
+    AssetManager&                   assets,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           extent,

@@ -14,13 +14,20 @@
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <engine/ModelPrefab.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Render/Types.hpp>
 #include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace ZHLN {
 
@@ -35,6 +42,25 @@ struct Counter;
 }
 
 using AssetAsyncLoad = FS::AsyncLoad;
+
+enum class ProceduralShape : uint8_t { Box, Plane, Sphere, Cylinder, Cone };
+
+struct ProceduralMeshRecipe {
+    ProceduralShape shape      = ProceduralShape::Box;
+    FVec3           dimensions = FVec3::Zero();
+    FVec4           color      = {1.0f, 1.0f, 1.0f, 1.0f};
+    bool            buildBLAS  = true;
+};
+
+struct ProceduralMaterialRecipe {
+    FVec4 color     = {1.0f, 1.0f, 1.0f, 1.0f};
+    float roughness = 0.3f;
+    float metallic  = 0.1f;
+};
+
+[[nodiscard]] auto HashProceduralMeshID(const ProceduralMeshRecipe& recipe) noexcept -> AssetID;
+[[nodiscard]] auto HashProceduralMaterialID(const ProceduralMaterialRecipe& recipe) noexcept -> MaterialID;
+[[nodiscard]] auto HashMaterialOverrideID(const Material& material) noexcept -> MaterialID;
 
 // No caller outside the engine names this type: a host holds an AssetLibrary
 // (Engine::Assets()), a graph node gets one from its bundle, and every public
@@ -113,6 +139,17 @@ class AssetManager {
     // leaves earlier views alive until then.
     [[nodiscard]] auto FindEnvironmentImage(std::string_view key) const noexcept -> std::optional<EnvironmentImageView>;
 
+    // Procedural primitive meshes and default materials cached by deterministic
+    // AssetID/MaterialID. Recipes survive device-loss recovery so
+    // RebuildVulkanResources can recreate their GPU buffers without storing
+    // mesh handles on ECS components.
+    [[nodiscard]] auto FindProceduralMesh(AssetID id) const noexcept -> std::optional<Mesh>;
+    void               CacheProceduralMesh(AssetID id, const ProceduralMeshRecipe& recipe, const Mesh& mesh);
+    [[nodiscard]] auto FindProceduralMaterial(MaterialID id) const noexcept -> std::optional<Material>;
+    void               CacheProceduralMaterial(MaterialID id, const ProceduralMaterialRecipe& recipe, const Material& material);
+    [[nodiscard]] auto CopyProceduralMeshRecipes() const -> std::vector<std::pair<AssetID, ProceduralMeshRecipe>>;
+    [[nodiscard]] auto CopyProceduralMaterialRecipes() const -> std::vector<std::pair<MaterialID, ProceduralMaterialRecipe>>;
+
     // Cached model parts own their GPU buffers, shared by all instances of
     // each prefab. The context must outlive the cache (Kernel enforces this).
     // Importers bind their context before caching newly uploaded parts.
@@ -138,6 +175,15 @@ class AssetManager {
     }
 
   private:
+    struct ProceduralMeshEntry {
+        ProceduralMeshRecipe recipe {};
+        Mesh                 mesh {};
+    };
+    struct ProceduralMaterialEntry {
+        ProceduralMaterialRecipe recipe {};
+        Material                 material {};
+    };
+
     void ReleaseCachedMeshBuffers() noexcept;
 
     // Borrowed from Kernel/GLTF's upload context, never a renderer-owned
@@ -152,6 +198,10 @@ class AssetManager {
     FS::AssetCache<std::shared_ptr<const Physics::MeshGeometry>> _collisionMeshes;
     FS::AssetCache<ModelPrefab> _prefabCache;
     FS::AssetCache<EnvironmentImage> _environmentImages;
+
+    mutable ZHLN::Mutex _proceduralMutex {};
+    std::unordered_map<AssetID, ProceduralMeshEntry>        _proceduralMeshes;
+    std::unordered_map<MaterialID, ProceduralMaterialEntry> _proceduralMaterials;
 };
 
 }

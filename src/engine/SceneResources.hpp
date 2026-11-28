@@ -21,7 +21,6 @@ void Release(PhysicsContext& physics, Components::DynamicBodyComponent& componen
 void Release(PhysicsContext& physics, Components::CharacterBodyComponent& component);
 void Release(PhysicsContext& physics, Components::RagdollComponent& component);
 void Release(AudioContext& audio, Components::AudioSourceComponent& component);
-void Release(RenderContext& render, Components::OwnedMeshComponent& component);
 
 void Release(Engine& engine, Components::StaticBodyComponent& component);
 void Release(Engine& engine, Components::KinematicBodyComponent& component);
@@ -29,7 +28,6 @@ void Release(Engine& engine, Components::DynamicBodyComponent& component);
 void Release(Engine& engine, Components::CharacterBodyComponent& component);
 void Release(Engine& engine, Components::RagdollComponent& component);
 void Release(Engine& engine, Components::AudioSourceComponent& component);
-void Release(Engine& engine, Components::OwnedMeshComponent& component);
 void Release(Engine& engine, Components::SkeletalMeshComponent& component);
 void Release(Engine& engine, Components::MorphTargetComponent& component);
 

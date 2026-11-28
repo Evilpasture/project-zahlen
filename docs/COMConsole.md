@@ -21,9 +21,12 @@ generic ScriptBinder still reflects host-owned STL values locally. COM does not
 expose native inspection. Metadata `types`/`type` can describe a reflected type
 without granting storage access.
 
-GetRaw now enforces its documented **dynamic-only** contract. A guessed native
-family name cannot reveal a typed engine component behind the publication table.
-Published POD components are still reached by the normal GetEngineRaw path.
+GetRaw, AttachRaw, DetachRaw, and EntitiesWithRaw form one unified canonical-name
+COM seam. Unpublished native engine components and short-name aliases are
+refused so a guessed native family name cannot expose unexported storage;
+published POD engine components route to their typed storage with exact size,
+alignment, and LayoutHash validation, and consumer-defined dynamic components
+use raw byte storage.
 LogicWorld adds the data-only PBR component to its explicit publication list so
 debugger commands can be exercised without initializing graphics/audio/windows.
 

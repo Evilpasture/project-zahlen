@@ -171,14 +171,19 @@ void ConfigureUnlitCapture(ZHLN::COM::IEngine& engine) {
     return *built;
 }
 
-// Mirrors PrefabFactory::CreateBox for a caller-built mesh: same registered
-// assets and components, but Shape::None because no rebuild recipe exists.
-auto SpawnUnlitChamfer(ZHLN::COM::IEngine& engine, float x, const ZHLN::Material& material) -> ZHLN::Entity {
+struct ChamferBinding {
+    ZHLN::Entity     entity    = ZHLN::Entity::Null();
+    ZHLN::AssetID    meshAsset = ZHLN::InvalidAssetID;
+    ZHLN::MaterialID matAsset  = ZHLN::InvalidMaterialID;
+    ZHLN::Mesh       mesh {};
+};
+
+auto SpawnUnlitChamfer(ZHLN::COM::IEngine& engine, float x, const ZHLN::Material& material) -> ChamferBinding {
     auto& rc = *engine.Graphics();
     auto& reg = *engine.Entities();
     const ZHLN::Mesh mesh = UploadChamferedMesh(rc);
     if (mesh.posBuffer == ZHLN::BufferID::Invalid || mesh.indexBuffer == ZHLN::BufferID::Invalid) {
-        return ZHLN::Entity::Null();
+        return {};
     }
 
     const ZHLN::Entity e   = reg.CreateEntity();
@@ -195,14 +200,9 @@ auto SpawnUnlitChamfer(ZHLN::COM::IEngine& engine, float x, const ZHLN::Material
         ZHLN::Components::TransformComponent {.position = position, .rotation = ZHLN::Quat::Identity(), .scale = ZHLN::FVec3::Splat(1.0f)},
         ZHLN::Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
         ZHLN::Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = 2.0f},
-        ZHLN::Components::OwnedMeshComponent {.meshAsset = meshAsset,
-                                              .mesh      = mesh,
-                                              .shape     = ZHLN::Components::OwnedMeshComponent::Shape::None,
-                                              .dimensions = ZHLN::FVec3::Zero(),
-                                              .color      = ZHLN::FVec4{1.0f, 1.0f, 1.0f, 1.0f}},
         ZHLN::Components::PBRComponent {.roughness = material.roughnessFactor, .metallic = material.metallicFactor}
     );
-    return e;
+    return {.entity = e, .meshAsset = meshAsset, .matAsset = matAsset, .mesh = mesh};
 }
 
 // The fixture meshes are centred at world X=-1.2 and X=+1.2, with unit radius;
@@ -239,8 +239,22 @@ struct UnlitMaterialsTestSuite {
             const auto orangeMat = rc.CreateMaterial(ZHLN::MaterialDesc {.unlit = true, .baseColor = {1.0f, 0.21763764f, 0.0f, 1.0f}});
             const auto blueMat   = rc.CreateMaterial(ZHLN::MaterialDesc {.unlit = true, .baseColor = {0.0f, 0.21763764f, 1.0f, 1.0f}});
             if (!orangeMat || !blueMat) return std::unexpected(UnlitMaterialError::UnlitMaterialFailed);
-            if (SpawnUnlitChamfer(*engine, -1.2f, *orangeMat) == ZHLN::Entity::Null() ||
-                SpawnUnlitChamfer(*engine, 1.2f, *blueMat) == ZHLN::Entity::Null()) {
+            std::array<ChamferBinding, 2> chamfers {};
+            ZHLN::defer cleanupChamfers([&] {
+                engine->ClearScene();
+                for (const auto& c: chamfers) {
+                    if (c.mesh.posBuffer != ZHLN::BufferID::Invalid) {
+                        rc.UnregisterMesh(c.meshAsset);
+                        rc.DestroyMesh(c.mesh);
+                    }
+                    if (c.matAsset != ZHLN::InvalidMaterialID) {
+                        rc.UnregisterMaterial(c.matAsset);
+                    }
+                }
+            });
+            chamfers[0] = SpawnUnlitChamfer(*engine, -1.2f, *orangeMat);
+            chamfers[1] = SpawnUnlitChamfer(*engine, 1.2f, *blueMat);
+            if (chamfers[0].entity == ZHLN::Entity::Null() || chamfers[1].entity == ZHLN::Entity::Null()) {
                 return std::unexpected(UnlitMaterialError::AssetUnavailable);
             }
 

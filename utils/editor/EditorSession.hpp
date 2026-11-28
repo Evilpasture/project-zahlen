@@ -31,8 +31,15 @@ class Session {
     auto        Pick(COM::IEngine&, const Camera&, const ViewportRect&, float mouseX, float mouseY) -> Entity;
 
   private:
+    struct FallbackMesh {
+        AssetID  assetID    = InvalidAssetID;
+        Mesh     mesh {};
+        uint64_t generation = 0;
+    };
     auto                                               RefreshPrimitives(COM::IEngine&) -> std::expected<void, ErrorCode>;
+    void                                               ReleaseFallbackMeshes(COM::IEngine&);
     std::unordered_map<uint64_t, Scene::Material> _materials;
+    std::unordered_map<uint64_t, FallbackMesh>         _fallbackMeshes;
     auto                                               Draw(COM::IEngine&, HostUI&, float) -> std::expected<void, ErrorCode>;
     bool                                               _started   = false;
     bool                                               _buildBLAS = true, _saveDown = false, _escapeDown = false, _mouseDown = false;

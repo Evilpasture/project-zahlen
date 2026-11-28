@@ -345,8 +345,91 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
 
 } // namespace
 
+namespace {
+
+[[nodiscard]] auto BuildProceduralMesh(RenderContext& gfx, const ProceduralMeshRecipe& recipe) -> std::expected<Mesh, ErrorCode> {
+    switch (recipe.shape) {
+        case ProceduralShape::Box:
+            return BuildBoxMesh(gfx, recipe.dimensions, recipe.color, recipe.buildBLAS);
+        case ProceduralShape::Plane:
+            return BuildPlaneMesh(gfx, recipe.dimensions.x, recipe.color, recipe.buildBLAS);
+        case ProceduralShape::Sphere:
+            return BuildSphereMesh(gfx, recipe.dimensions.x, recipe.color, recipe.buildBLAS);
+        case ProceduralShape::Cylinder:
+            return BuildCylinderMesh(gfx, recipe.dimensions.x, recipe.dimensions.y, recipe.color, recipe.buildBLAS);
+        case ProceduralShape::Cone:
+            return BuildConeMesh(gfx, recipe.dimensions.x, recipe.dimensions.y, recipe.color, recipe.buildBLAS);
+    }
+    return BuildBoxMesh(gfx, recipe.dimensions, recipe.color, recipe.buildBLAS);
+}
+
+[[nodiscard]] auto AcquireProceduralMesh(RenderContext& gfx, AssetManager& assets, const ProceduralMeshRecipe& recipe)
+    -> std::expected<AssetID, ErrorCode> {
+    const AssetID meshAsset = HashProceduralMeshID(recipe);
+    if (const auto cached = assets.FindProceduralMesh(meshAsset)) {
+        if (!gfx.GetGPUMesh(meshAsset).has_value()) {
+            gfx.RegisterGPUMesh(meshAsset, *cached);
+        }
+        return meshAsset;
+    }
+    auto built = BuildProceduralMesh(gfx, recipe);
+    if (!built) [[unlikely]] {
+        return std::unexpected(built.error());
+    }
+    assets.CacheProceduralMesh(meshAsset, recipe, *built);
+    gfx.RegisterGPUMesh(meshAsset, *built);
+    return meshAsset;
+}
+
+[[nodiscard]] auto AcquireProceduralMaterial(
+    RenderContext&     gfx,
+    AssetManager&      assets,
+    const SpawnParams& params,
+    FVec4              defaultColor,
+    float              defaultRoughness,
+    float              defaultMetallic
+) -> std::pair<MaterialID, Material> {
+    if (params.materialOverride.pipeline != PipelineID::Invalid) {
+        // Deduplicate caller-supplied overrides by full material content hash
+        // instead of allocating one ID per entity, and keep caller-owned
+        // overrides out of AssetManager's default PBR rebuild map so device-lost
+        // rebuilds cannot strip override flags (unlit, doubleSided, alphaMode,
+        // textures) into a plain opaque PBR material.
+        const Material   mat      = params.materialOverride;
+        const MaterialID matAsset = HashMaterialOverrideID(mat);
+        if (!gfx.GetGPUMaterial(matAsset).has_value()) {
+            gfx.RegisterGPUMaterial(matAsset, mat);
+        }
+        return {matAsset, mat};
+    }
+
+    const ProceduralMaterialRecipe recipe {.color = defaultColor, .roughness = defaultRoughness, .metallic = defaultMetallic};
+    const MaterialID               matAsset = HashProceduralMaterialID(recipe);
+    if (const auto cached = assets.FindProceduralMaterial(matAsset)) {
+        if (!gfx.GetGPUMaterial(matAsset).has_value()) {
+            gfx.RegisterGPUMaterial(matAsset, *cached);
+        }
+        return {matAsset, *cached};
+    }
+
+    auto matRes = gfx.CreateMaterial(
+        defaultColor.w < 1.0f ? MaterialDesc::Transparent({defaultColor.x, defaultColor.y, defaultColor.z, defaultColor.w}) :
+                                MaterialDesc::Basic({defaultColor.x, defaultColor.y, defaultColor.z, defaultColor.w})
+    );
+    Material mat        = matRes.value_or(Material {});
+    mat.baseColorFactor = defaultColor;
+    mat.roughnessFactor = defaultRoughness;
+    mat.metallicFactor  = defaultMetallic;
+    assets.CacheProceduralMaterial(matAsset, recipe, mat);
+    gfx.RegisterGPUMaterial(matAsset, mat);
+    return {matAsset, mat};
+}
+
+} // namespace
+
 auto CreateBoxInternal(
     RenderContext&                  gfx,
+    AssetManager&                   assets,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     ZHLN::FVec3                     halfExtents,
@@ -358,31 +441,21 @@ auto CreateBoxInternal(
         boxColor = {0.8f, 0.4f, 0.2f, 1.0f};
     }
 
-    auto built = BuildBoxMesh(gfx, halfExtents, boxColor, buildBLAS);
-    if (!built) [[unlikely]] {
-        return std::unexpected(built.error());
+    const ProceduralMeshRecipe recipe {
+        .shape      = ProceduralShape::Box,
+        .dimensions = halfExtents,
+        .color      = boxColor,
+        .buildBLAS  = buildBLAS,
+    };
+    auto meshAssetRes = AcquireProceduralMesh(gfx, assets, recipe);
+    if (!meshAssetRes) [[unlikely]] {
+        return std::unexpected(meshAssetRes.error());
     }
-    Mesh mesh = std::move(*built);
+    const AssetID meshAsset = *meshAssetRes;
 
-    Material mat;
-    if (params.materialOverride.pipeline != PipelineID::Invalid) {
-        mat = params.materialOverride;
-    } else {
-        auto mat_res        = gfx.CreateMaterial(MaterialDesc::Basic());
-        mat                 = mat_res.value_or(Material {});
-        mat.baseColorFactor = {boxColor.x, boxColor.y, boxColor.z, boxColor.w};
-        mat.roughnessFactor = 0.3f;
-        mat.metallicFactor  = 0.1f;
-    }
-
-    Entity     e         = reg.Create();
-    AssetID    meshAsset = HashAssetID("prefab_box_mesh_" + std::to_string(e.index));
-    MaterialID matAsset  = HashAssetID("prefab_box_mat_" + std::to_string(e.index));
-
-    gfx.RegisterGPUMesh(meshAsset, mesh);
-    gfx.RegisterGPUMaterial(matAsset, mat);
-
-    const auto worldMat = SpawnMatrix(params);
+    Entity e             = reg.Create();
+    auto [matAsset, mat] = AcquireProceduralMaterial(gfx, assets, params, boxColor, 0.3f, 0.1f);
+    const auto worldMat  = SpawnMatrix(params);
 
     reg.Add(e, Components::NameComponent {.name = String64("Box_" + std::to_string(e.index))});
     reg.Add(e, SpawnLocalTransform(params));
@@ -390,16 +463,6 @@ auto CreateBoxInternal(
 
     float maxExtent = std::max({halfExtents.x, halfExtents.y, halfExtents.z});
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = maxExtent * 2.0f});
-    reg.Add(
-        e, Components::OwnedMeshComponent {
-               .meshAsset  = meshAsset,
-               .mesh       = mesh,
-               .shape      = Components::OwnedMeshComponent::Shape::Box,
-               .dimensions = halfExtents,
-               .color      = boxColor,
-               .buildBLAS  = buildBLAS
-           }
-    );
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
@@ -429,52 +492,29 @@ namespace {
 
 template <typename ShapeT>
 auto SpawnPrimitive(
-    RenderContext&                        gfx,
-    ECS::Registry&                        reg,
-    ZHLN::Optional<PhysicsContext&>       pc,
-    std::string_view                      shapeName,
-    Mesh                                  mesh,
-    Components::OwnedMeshComponent::Shape shape,
-    FVec3                                 dimensions,
-    float                                 cullRadius,
-    const ShapeT&                         physicsShape,
-    const SpawnParams&                    params,
-    bool                                  buildBLAS
+    RenderContext&                  gfx,
+    AssetManager&                   assets,
+    ECS::Registry&                  reg,
+    ZHLN::Optional<PhysicsContext&> pc,
+    std::string_view                shapeName,
+    AssetID                         meshAsset,
+    float                           cullRadius,
+    const ShapeT&                   physicsShape,
+    const SpawnParams&              params
 ) -> Entity {
     auto shapeColor = params.color;
     if (!(shapeColor.w >= 0.0f)) {
         shapeColor = {0.8f, 0.4f, 0.2f, 1.0f};
     }
 
-    Material mat;
-    if (params.materialOverride.pipeline != PipelineID::Invalid) {
-        mat = params.materialOverride;
-    } else {
-        auto mat_res        = gfx.CreateMaterial(MaterialDesc::Basic());
-        mat                 = mat_res.value_or(Material {});
-        mat.baseColorFactor = {shapeColor.x, shapeColor.y, shapeColor.z, shapeColor.w};
-        mat.roughnessFactor = params.roughness;
-        mat.metallicFactor  = params.metallic;
-    }
-
-    Entity     e         = reg.Create();
-    AssetID    meshAsset = HashAssetID("prefab_" + std::string(shapeName) + "_mesh_" + std::to_string(e.index));
-    MaterialID matAsset  = HashAssetID("prefab_" + std::string(shapeName) + "_mat_" + std::to_string(e.index));
-
-    gfx.RegisterGPUMesh(meshAsset, mesh);
-    gfx.RegisterGPUMaterial(matAsset, mat);
-
-    const auto worldMat = SpawnMatrix(params);
+    Entity e             = reg.Create();
+    auto [matAsset, mat] = AcquireProceduralMaterial(gfx, assets, params, shapeColor, params.roughness, params.metallic);
+    const auto worldMat  = SpawnMatrix(params);
 
     reg.Add(e, Components::NameComponent {.name = String64(std::string(shapeName) + "_" + std::to_string(e.index))});
     reg.Add(e, SpawnLocalTransform(params));
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = cullRadius});
-    reg.Add(
-        e, Components::OwnedMeshComponent {
-               .meshAsset = meshAsset, .mesh = mesh, .shape = shape, .dimensions = dimensions, .color = shapeColor, .buildBLAS = buildBLAS
-           }
-    );
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
@@ -500,26 +540,34 @@ auto SpawnPrimitive(
 
 } // namespace
 
-auto CreateSphereInternal(RenderContext& gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params, bool buildBLAS)
-    -> std::expected<Entity, ErrorCode> {
+auto CreateSphereInternal(
+    RenderContext&                  gfx,
+    AssetManager&                   assets,
+    ECS::Registry&                  reg,
+    ZHLN::Optional<PhysicsContext&> pc,
+    float                           radius,
+    const SpawnParams&              params,
+    bool                            buildBLAS
+) -> std::expected<Entity, ErrorCode> {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
         resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
-    auto built = BuildSphereMesh(gfx, radius, resolved.color, buildBLAS);
-    if (!built) [[unlikely]] {
-        return std::unexpected(built.error());
+    auto        meshAssetRes = AcquireProceduralMesh(
+        gfx, assets,
+        ProceduralMeshRecipe {.shape = ProceduralShape::Sphere, .dimensions = FVec3 {radius, 0.0f, 0.0f}, .color = resolved.color, .buildBLAS = buildBLAS}
+    );
+    if (!meshAssetRes) [[unlikely]] {
+        return std::unexpected(meshAssetRes.error());
     }
 
-    return SpawnPrimitive(
-        gfx, reg, pc, "Sphere", std::move(*built), Components::OwnedMeshComponent::Shape::Sphere,
-        FVec3 {radius, 0.0f, 0.0f}, radius * maxScale * 2.0f, Physics::Sphere {radius * maxScale}, resolved, buildBLAS
-    );
+    return SpawnPrimitive(gfx, assets, reg, pc, "Sphere", *meshAssetRes, radius * maxScale * 2.0f, Physics::Sphere {radius * maxScale}, resolved);
 }
 
 auto CreateCylinderInternal(
     RenderContext&                  gfx,
+    AssetManager&                   assets,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           radius,
@@ -532,20 +580,25 @@ auto CreateCylinderInternal(
         resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
-    auto built = BuildCylinderMesh(gfx, radius, height, resolved.color, buildBLAS);
-    if (!built) [[unlikely]] {
-        return std::unexpected(built.error());
+    auto        meshAssetRes = AcquireProceduralMesh(
+        gfx, assets,
+        ProceduralMeshRecipe {
+            .shape = ProceduralShape::Cylinder, .dimensions = FVec3 {radius, height, 0.0f}, .color = resolved.color, .buildBLAS = buildBLAS
+        }
+    );
+    if (!meshAssetRes) [[unlikely]] {
+        return std::unexpected(meshAssetRes.error());
     }
 
     return SpawnPrimitive(
-        gfx, reg, pc, "Cylinder", std::move(*built), Components::OwnedMeshComponent::Shape::Cylinder,
-        FVec3 {radius, height, 0.0f}, std::max(radius, height * 0.5f) * maxScale * 2.0f,
-        Physics::Cylinder {height * 0.5f * maxScale, radius * maxScale}, resolved, buildBLAS
+        gfx, assets, reg, pc, "Cylinder", *meshAssetRes, std::max(radius, height * 0.5f) * maxScale * 2.0f,
+        Physics::Cylinder {height * 0.5f * maxScale, radius * maxScale}, resolved
     );
 }
 
 auto CreateConeInternal(
     RenderContext&                  gfx,
+    AssetManager&                   assets,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           radius,
@@ -558,20 +611,25 @@ auto CreateConeInternal(
         resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
-    auto built = BuildConeMesh(gfx, radius, height, resolved.color, buildBLAS);
-    if (!built) [[unlikely]] {
-        return std::unexpected(built.error());
+    auto        meshAssetRes = AcquireProceduralMesh(
+        gfx, assets,
+        ProceduralMeshRecipe {
+            .shape = ProceduralShape::Cone, .dimensions = FVec3 {radius, height, 0.0f}, .color = resolved.color, .buildBLAS = buildBLAS
+        }
+    );
+    if (!meshAssetRes) [[unlikely]] {
+        return std::unexpected(meshAssetRes.error());
     }
 
     return SpawnPrimitive(
-        gfx, reg, pc, "Cone", std::move(*built), Components::OwnedMeshComponent::Shape::Cone,
-        FVec3 {radius, height, 0.0f}, std::max(radius, height * 0.5f) * maxScale * 2.0f,
-        Physics::Cylinder {height * 0.5f * maxScale, radius * 0.5f * maxScale}, resolved, buildBLAS
+        gfx, assets, reg, pc, "Cone", *meshAssetRes, std::max(radius, height * 0.5f) * maxScale * 2.0f,
+        Physics::Cylinder {height * 0.5f * maxScale, radius * 0.5f * maxScale}, resolved
     );
 }
 
 auto CreatePlaneInternal(
     RenderContext&                  gfx,
+    AssetManager&                   assets,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           extent,
@@ -579,47 +637,24 @@ auto CreatePlaneInternal(
     const SpawnParams&              params,
     bool                            buildBLAS
 ) -> std::expected<Entity, ErrorCode> {
-    auto built = BuildPlaneMesh(gfx, extent, color, buildBLAS);
-    if (!built) [[unlikely]] {
-        return std::unexpected(built.error());
+    auto meshAssetRes = AcquireProceduralMesh(
+        gfx, assets,
+        ProceduralMeshRecipe {.shape = ProceduralShape::Plane, .dimensions = FVec3 {extent, 0.0f, 0.0f}, .color = color, .buildBLAS = buildBLAS}
+    );
+    if (!meshAssetRes) [[unlikely]] {
+        return std::unexpected(meshAssetRes.error());
     }
-    Mesh mesh = std::move(*built);
+    const AssetID meshAsset = *meshAssetRes;
 
-    Material mat;
-    if (params.materialOverride.pipeline != PipelineID::Invalid) {
-        mat = params.materialOverride;
-    } else {
-        auto mat_res        = gfx.CreateMaterial(MaterialDesc::Basic());
-        mat                 = mat_res.value_or(Material {});
-        mat.baseColorFactor = color;
-        mat.roughnessFactor = 0.35f;
-        mat.metallicFactor  = 0.15f;
-    }
-
-    Entity     e         = reg.Create();
-    AssetID    meshAsset = HashAssetID("prefab_plane_mesh_" + std::to_string(e.index));
-    MaterialID matAsset  = HashAssetID("prefab_plane_mat_" + std::to_string(e.index));
-
-    gfx.RegisterGPUMesh(meshAsset, mesh);
-    gfx.RegisterGPUMaterial(matAsset, mat);
-
-    const auto worldMat = SpawnMatrix(params);
+    Entity e             = reg.Create();
+    auto [matAsset, mat] = AcquireProceduralMaterial(gfx, assets, params, color, 0.35f, 0.15f);
+    const auto worldMat  = SpawnMatrix(params);
 
     reg.Add(e, Components::NameComponent {.name = String64("Plane_" + std::to_string(e.index))});
     reg.Add(e, SpawnLocalTransform(params));
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = extent * 2.0f});
-    reg.Add(
-        e, Components::OwnedMeshComponent {
-               .meshAsset  = meshAsset,
-               .mesh       = mesh,
-               .shape      = Components::OwnedMeshComponent::Shape::Plane,
-               .dimensions = {extent, 0.0f, 0.0f},
-               .color      = color,
-               .buildBLAS  = buildBLAS
-           }
-    );
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
@@ -706,18 +741,12 @@ auto InstantiatePrefabInternal(
             if (it != instantiatedParts.end()) {
                 Entity targetEntity = it->second;
 
-                Components::CSGComponent csgComp;
                 for (const auto& mod: part.csgModifiers) {
                     auto opIt = instantiatedParts.find(mod.operand_name);
                     if (opIt != instantiatedParts.end()) {
-                        csgComp.modifiers.push_back({.operation = mod.operation, .operandEntity = opIt->second});
-
+                        reg.Add(opIt->second, Components::CSGCutterComponent {.target = targetEntity, .operation = mod.operation});
                         reg.Patch<Components::MeshComponent>(opIt->second, [&](auto& cutMesh) -> auto { cutMesh.flags |= DrawFlags::Hidden; });
                     }
-                }
-
-                if (!csgComp.modifiers.empty()) {
-                    reg.Add(targetEntity, std::move(csgComp));
                 }
             }
         }
@@ -783,100 +812,39 @@ auto InstantiatePrefabInternal(
     return spawnedCount;
 }
 
-void RebuildVulkanResources(RenderContext& gfx, ECS::Registry& reg) {
+void RebuildVulkanResources(RenderContext& gfx, AssetManager& assets) {
     kLog.Warn("Device Lost: Rebuilding procedural resources; other GPU assets re-upload lazily.");
 
     gfx.ClearGPUCaches();
 
-    // The scene owns its procedural mesh buffers. Its recipes survive device
-    // loss, but its old IDs do not; rebuild these with the new context.
-    // Terrain and other data-driven meshes are lazily rebuilt by their systems.
-    using Shape         = Components::OwnedMeshComponent::Shape;
-    const auto entities = reg.GetEntitiesWith<Components::OwnedMeshComponent>();
-    auto       owners   = reg.GetRawArray<Components::OwnedMeshComponent>();
-    for (size_t i = 0; i < entities.size(); ++i) {
-        auto& owned = owners[i];
-        switch (owned.shape) {
-            case Shape::Box: {
-                auto rebuilt = BuildBoxMesh(gfx, owned.dimensions, owned.color, owned.buildBLAS);
-                if (!rebuilt) [[unlikely]] {
-                    kLog.Error("Procedural mesh rebuild failed (shape=box, error={})", rebuilt.error());
-                    // Whatever IDs it still holds died with the old context.
-                    owned.mesh = {};
-                    break;
-                }
-                owned.mesh = std::move(*rebuilt);
-                break;
-            }
-            case Shape::Plane: {
-                auto rebuilt = BuildPlaneMesh(gfx, owned.dimensions.x, owned.color, owned.buildBLAS);
-                if (!rebuilt) [[unlikely]] {
-                    kLog.Error("Procedural mesh rebuild failed (shape=plane, error={})", rebuilt.error());
-                    // Whatever IDs it still holds died with the old context.
-                    owned.mesh = {};
-                    break;
-                }
-                owned.mesh = std::move(*rebuilt);
-                break;
-            }
-            case Shape::Sphere: {
-                auto rebuilt = BuildSphereMesh(gfx, owned.dimensions.x, owned.color, owned.buildBLAS);
-                if (!rebuilt) [[unlikely]] {
-                    kLog.Error("Procedural mesh rebuild failed (shape=sphere, error={})", rebuilt.error());
-                    // Whatever IDs it still holds died with the old context.
-                    owned.mesh = {};
-                    break;
-                }
-                owned.mesh = std::move(*rebuilt);
-                break;
-            }
-            case Shape::Cylinder: {
-                auto rebuilt = BuildCylinderMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color, owned.buildBLAS);
-                if (!rebuilt) [[unlikely]] {
-                    kLog.Error("Procedural mesh rebuild failed (shape=cylinder, error={})", rebuilt.error());
-                    // Whatever IDs it still holds died with the old context.
-                    owned.mesh = {};
-                    break;
-                }
-                owned.mesh = std::move(*rebuilt);
-                break;
-            }
-            case Shape::Cone: {
-                auto rebuilt = BuildConeMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color, owned.buildBLAS);
-                if (!rebuilt) [[unlikely]] {
-                    kLog.Error("Procedural mesh rebuild failed (shape=cone, error={})", rebuilt.error());
-                    // Whatever IDs it still holds died with the old context.
-                    owned.mesh = {};
-                    break;
-                }
-                owned.mesh = std::move(*rebuilt);
-                break;
-            }
-            case Shape::None:
-                continue;
+    // Procedural primitive recipes live in AssetManager. Their old GPU handles
+    // were invalidated before the old RenderContext was destroyed; rebuild each
+    // unique cached primitive and default material once against the new device.
+    for (const auto& [assetID, recipe]: assets.CopyProceduralMeshRecipes()) {
+        auto rebuilt = BuildProceduralMesh(gfx, recipe);
+        if (!rebuilt) [[unlikely]] {
+            kLog.Error("Procedural mesh rebuild failed (shape={}, error={})", static_cast<uint32_t>(recipe.shape), rebuilt.error());
+            continue;
         }
-        if (owned.meshAsset != InvalidAssetID && owned.mesh.posBuffer != BufferID::Invalid) {
-            gfx.RegisterGPUMesh(owned.meshAsset, owned.mesh);
-        }
+        assets.CacheProceduralMesh(assetID, recipe, *rebuilt);
+        gfx.RegisterGPUMesh(assetID, *rebuilt);
+    }
 
-        // Default procedural materials also lived in the lost renderer.
-        // Recreate a drawable baseline from the scene's color/PBR settings;
-        // data-driven materials are restored by their own asset systems.
-        const auto meshComp = reg.Get<Components::MeshComponent>(entities[i]);
-        if (meshComp && !gfx.GetGPUMaterial(meshComp->materialAsset).has_value()) {
-            if (auto created = gfx.CreateMaterial(
-                    owned.color.w < 1.0f ? MaterialDesc::Transparent({owned.color.x, owned.color.y, owned.color.z, owned.color.w}) :
-                                           MaterialDesc::Basic({owned.color.x, owned.color.y, owned.color.z, owned.color.w})
-                )) {
-                Material mat        = *created;
-                mat.baseColorFactor = {owned.color.x, owned.color.y, owned.color.z, owned.color.w};
-                if (const auto pbr = reg.Get<Components::PBRComponent>(entities[i])) {
-                    mat.roughnessFactor = pbr->roughness;
-                    mat.metallicFactor  = pbr->metallic;
-                }
-                gfx.RegisterGPUMaterial(meshComp->materialAsset, mat);
-            }
+    for (const auto& [matID, recipe]: assets.CopyProceduralMaterialRecipes()) {
+        auto created = gfx.CreateMaterial(
+            recipe.color.w < 1.0f ? MaterialDesc::Transparent({recipe.color.x, recipe.color.y, recipe.color.z, recipe.color.w}) :
+                                    MaterialDesc::Basic({recipe.color.x, recipe.color.y, recipe.color.z, recipe.color.w})
+        );
+        if (!created) [[unlikely]] {
+            kLog.Error("Procedural material rebuild failed (error={})", created.error());
+            continue;
         }
+        Material mat        = *created;
+        mat.baseColorFactor = recipe.color;
+        mat.roughnessFactor = recipe.roughness;
+        mat.metallicFactor  = recipe.metallic;
+        assets.CacheProceduralMaterial(matID, recipe, mat);
+        gfx.RegisterGPUMaterial(matID, mat);
     }
 }
 

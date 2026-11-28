@@ -6,7 +6,9 @@
 #include <Zahlen/ECS/Entity.hpp>
 #include <ecs/ECS.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <new>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -25,7 +27,8 @@ class EntityCommandBuffer {
     // The capacity is a hard limit -- an overrun panics in LinearArena rather
     // than falling back to the heap, so a scene that outgrows its buffer says so
     // instead of quietly paying for it every frame.
-    static constexpr size_t DefaultArenaCapacity = 256 * 1024;
+    static constexpr size_t   DefaultArenaCapacity = 256 * 1024;
+    static constexpr uint32_t kTempGeneration      = 0xFFFFFFFFu;
 
     explicit EntityCommandBuffer(Registry& reg, DestroyFn destroy = nullptr, size_t arenaCapacity = DefaultArenaCapacity):
         _registry(&reg), _destroy(destroy), _arena(arenaCapacity) {
@@ -40,8 +43,8 @@ class EntityCommandBuffer {
     auto operator=(EntityCommandBuffer&&) -> EntityCommandBuffer&      = delete;
 
     [[nodiscard]] auto CreateEntity() -> Entity {
-        Entity e = {.index = _tempIndexCounter++, .generation = 0xFFFFFFFF};
-        _commands.push_back({CommandType::Create, e, 0, nullptr, nullptr, nullptr});
+        Entity e = {.index = _tempIndexCounter++, .generation = kTempGeneration};
+        _commands.push_back({CommandType::Create, e, nullptr, nullptr, nullptr});
         return e;
     }
 
@@ -63,29 +66,29 @@ class EntityCommandBuffer {
     }
 
     void DestroyEntity(Entity e) {
-        _commands.push_back({CommandType::Destroy, e, 0, nullptr, nullptr, nullptr});
+        _commands.push_back({CommandType::Destroy, e, nullptr, nullptr, nullptr});
     }
 
     template <typename T>
     void AddComponent(Entity e, T&& component) {
         using ComponentType = std::decay_t<T>;
-        uint32_t familyId   = ComponentFamily::GetTypeID<ComponentType>();
 
         void* storage = _arena.Allocate(sizeof(ComponentType), alignof(ComponentType));
         ::new (storage) ComponentType(std::forward<T>(component));
 
         // The destructor runs the component's destructor and nothing else: the
         // storage is the arena's, and one Reset() reclaims every payload at
-        // once. A type with a destructor and no way to free it is exactly what
-        // the ECB wants -- the lifetime it manages is the buffer's, not each
-        // component's.
-        auto destructor = [](void* ptr) -> auto {
-            static_cast<ComponentType*>(ptr)->~ComponentType();
+        // once. Trivially destructible payloads skip the thunk entirely.
+        void (*destructor)(void*) = nullptr;
+        if constexpr (!std::is_trivially_destructible_v<ComponentType>) {
+            destructor = +[](void* ptr) { static_cast<ComponentType*>(ptr)->~ComponentType(); };
+        }
+
+        auto applyFn = +[](Registry& reg, Entity target, void* ptr) {
+            reg.Add<ComponentType>(target, std::move(*static_cast<ComponentType*>(ptr)));
         };
 
-        auto applyFn = [](Registry& reg, Entity target, void* ptr) -> auto { reg.Add<ComponentType>(target, std::move(*static_cast<ComponentType*>(ptr))); };
-
-        _commands.push_back({CommandType::AddComponent, e, familyId, storage, destructor, applyFn});
+        _commands.push_back({CommandType::AddComponent, e, storage, destructor, applyFn});
     }
 
     template <typename C1, typename... Cs>
@@ -111,12 +114,13 @@ class EntityCommandBuffer {
     template <typename T>
     void RemoveComponent(Entity e) {
         using ComponentType = std::decay_t<T>;
-        uint32_t familyId   = ComponentFamily::GetTypeID<ComponentType>();
-        auto     applyFn    = [](Registry& reg, Entity target, void*) -> void { reg.Remove<ComponentType>(target); };
-        _commands.push_back({CommandType::RemoveComponent, e, familyId, nullptr, nullptr, applyFn});
+        auto applyFn        = +[](Registry& reg, Entity target, void*) { reg.Remove<ComponentType>(target); };
+        _commands.push_back({CommandType::RemoveComponent, e, nullptr, nullptr, applyFn});
     }
 
-    [[nodiscard]] auto Targets(const Registry& registry) const noexcept -> bool { return _registry == &registry; }
+    [[nodiscard]] auto Targets(const Registry& registry) const noexcept -> bool {
+        return _registry == &registry;
+    }
 
     [[nodiscard]] auto Empty() const noexcept -> bool {
         return _commands.empty();
@@ -131,7 +135,6 @@ class EntityCommandBuffer {
     struct Command {
         CommandType type;
         Entity      entity;
-        uint32_t    familyId;
         void*       componentData;
         void (*destructor)(void*);
         void (*applyFn)(Registry&, Entity, void*);
@@ -141,7 +144,7 @@ class EntityCommandBuffer {
     DestroyFn            _destroy  = nullptr;
     std::vector<Command> _commands;
     LinearArena          _arena;
-    uint32_t             _tempIndexCounter = 0xF0000000;
+    uint32_t             _tempIndexCounter = 0;
 };
 
-}
+} // namespace ZHLN::ECS

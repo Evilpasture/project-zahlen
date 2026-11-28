@@ -6,24 +6,11 @@
 #include <ecs/ECS.hpp>
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 namespace ZHLN::ECS {
 
 namespace {
-
-ZHLN::Mutex                 s_FamilyMutex {};
-uint32_t                    s_TypeCounter = 0;
-HashMap<uint32_t, uint32_t> s_HashToDense;
-// Node-based storage keeps references stable across insertions and rehashes.
-// The map and per-registry type metadata both refer to these owned strings.
-std::unordered_set<std::string>     s_FamilyNames;
-HashMap<std::string_view, uint32_t> s_NameToFamilyID;
-// Process-global schema for byte-only families. A second registry may allocate
-// its own storage only for a family that was explicitly registered dynamic.
-std::unordered_map<uint32_t, std::pair<size_t, size_t>> s_DynamicFamilyLayouts;
 
 // Keep the old allocation sizes as well as their resource: a memory_resource
 // requires the exact size and alignment supplied at allocation on deallocation.
@@ -36,43 +23,81 @@ auto ReallocAligned(std::pmr::memory_resource* memory, void* oldPtr, size_t oldS
     return newPtr;
 }
 
+[[nodiscard]] constexpr auto IsValidLayout(size_t size, size_t alignment) noexcept -> bool {
+    return size > 0 && alignment > 0 && (alignment & (alignment - 1)) == 0 && (size % alignment) == 0;
+}
+
+// Single-component staging buffer used on the stack so onRetire hooks always
+// execute after sync.shadowLock is released without heap traffic for small PODs.
+struct PendingRetire {
+    static constexpr size_t kInlineSize  = 64;
+    static constexpr size_t kInlineAlign = 16;
+
+    SparseSet::RetireFn     onRetire  = nullptr;
+    void*                   hookCtx   = nullptr;
+    SparseSet::DestructorFn destroy   = nullptr;
+    void*                   storage   = nullptr;
+    size_t                  size      = 0;
+    size_t                  alignment = 1;
+    bool                    heapAlloc = false;
+    alignas(kInlineAlign) std::byte inlineBuf[kInlineSize] {};
+
+    [[nodiscard]] auto Allocate(std::pmr::memory_resource* memory, size_t sz, size_t align) -> void* {
+        size      = sz;
+        alignment = align;
+        if (sz <= kInlineSize && align <= kInlineAlign) {
+            storage   = inlineBuf;
+            heapAlloc = false;
+        } else {
+            storage   = memory->allocate(sz, align);
+            heapAlloc = true;
+        }
+        return storage;
+    }
+
+    void InvokeAndRelease(std::pmr::memory_resource* memory, Entity entity) noexcept {
+        if (onRetire != nullptr && storage != nullptr) {
+            onRetire(hookCtx, entity, storage);
+        }
+        if (destroy != nullptr && storage != nullptr) {
+            destroy(storage);
+        }
+        if (heapAlloc && storage != nullptr) {
+            memory->deallocate(storage, size, alignment);
+        }
+        storage   = nullptr;
+        heapAlloc = false;
+    }
+};
+
+struct PendingHeapRetire {
+    SparseSet::RetireFn     onRetire  = nullptr;
+    void*                   hookCtx   = nullptr;
+    SparseSet::DestructorFn destroy   = nullptr;
+    void*                   storage   = nullptr;
+    size_t                  size      = 0;
+    size_t                  alignment = 1;
+};
+
+struct PendingRetireBatch {
+    SparseSet::RetireFn       onRetire    = nullptr;
+    void*                     hookCtx     = nullptr;
+    SparseSet::DestructorFn   destroy     = nullptr;
+    SparseSet::ExtractedBatch batch       = {};
+    size_t                    elementSize = 0;
+    size_t                    alignment   = 1;
+};
+
 } // namespace
 
-auto ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept -> uint32_t {
-    return ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t {
-        if (const auto existing = s_HashToDense.Find(typeHash)) {
-            return *existing;
-        }
-        uint32_t id = s_TypeCounter++;
-        s_HashToDense.Insert(typeHash, id);
-        return id;
-    });
+SparseSet::SparseSet(size_t elementSize, size_t alignment, ZHLN::BufferSync* syncPtr, DestructorFn destructor, RelocateFn relocate):
+    SparseSet(elementSize, alignment, syncPtr, destructor, relocate, nullptr) {
 }
 
-void Registry::MapNameToFamilyID(std::string_view name, uint32_t id) noexcept {
-    InternAndMapNameToFamilyID(name, id);
-}
-
-auto Registry::InternAndMapNameToFamilyID(std::string_view name, uint32_t id) noexcept -> std::string_view {
-    return ZHLN::Lock(s_FamilyMutex, [&] -> std::string_view {
-        const auto             entry      = s_FamilyNames.emplace(name).first;
-        const std::string_view stableName = *entry;
-        s_NameToFamilyID.Insert(stableName, id);
-        return stableName;
-    });
-}
-
-auto Registry::GetFamilyIDFromName(std::string_view name) noexcept -> uint32_t {
-    return ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t { return s_NameToFamilyID.Find(name).value_or(0xFFFFFFFFu); });
-}
-
-SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor):
-    SparseSet(elementSize, alignment, syncPtr, destructor, nullptr) {
-}
-
-SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor, std::pmr::memory_resource* memory):
+SparseSet::SparseSet(size_t elementSize, size_t alignment, ZHLN::BufferSync* syncPtr, DestructorFn destructor, RelocateFn relocate,
+                     std::pmr::memory_resource* memory):
     _memory(memory != nullptr ? memory : std::pmr::get_default_resource()), _elementSize(elementSize), _alignment(alignment), _sync(syncPtr),
-    _destructor(destructor) {
+    _destructor(destructor), _relocate(relocate) {
 }
 
 SparseSet::~SparseSet() {
@@ -118,11 +143,24 @@ void SparseSet::ResizeDense() {
         ZHLN::Panic("FFI MEMORY VIOLATION: SparseSet Dense Resize");
     }
 
-    size_t oldCap  = _denseCapacity;
-    _denseCapacity = oldCap == 0 ? 64 : oldCap * 2;
+    const size_t oldCap = _denseCapacity;
+    _denseCapacity      = oldCap == 0 ? 64 : oldCap * 2;
 
-    _dense = static_cast<Entity*>(ReallocAligned(_memory, _dense, oldCap * sizeof(Entity), _denseCapacity * sizeof(Entity), alignof(Entity)));
-    _data  = static_cast<std::byte*>(ReallocAligned(_memory, _data, oldCap * _elementSize, _denseCapacity * _elementSize, _alignment));
+    _dense        = static_cast<Entity*>(ReallocAligned(_memory, _dense, oldCap * sizeof(Entity), _denseCapacity * sizeof(Entity), alignof(Entity)));
+    auto* newData = static_cast<std::byte*>(_memory->allocate(_denseCapacity * _elementSize, _alignment));
+    if (_data != nullptr) {
+        if (_count > 0) {
+            if (_relocate != nullptr) {
+                for (size_t i = 0; i < _count; ++i) {
+                    _relocate(newData + (i * _elementSize), _data + (i * _elementSize));
+                }
+            } else {
+                std::memcpy(newData, _data, _count * _elementSize);
+            }
+        }
+        _memory->deallocate(_data, oldCap * _elementSize, _alignment);
+    }
+    _data = newData;
 }
 
 void SparseSet::Insert(Entity entity, const void* data) {
@@ -146,7 +184,7 @@ void SparseSet::Insert(Entity entity, const void* data) {
     std::memcpy(_data + (denseIdx * _elementSize), data, _elementSize);
 }
 
-auto SparseSet::InsertEmpty(Entity entity) -> void* {
+auto SparseSet::ReserveSlot(Entity entity) -> void* {
     if (entity.index >= _sparseCapacity) {
         ResizeSparse(entity.index);
     }
@@ -159,8 +197,6 @@ auto SparseSet::InsertEmpty(Entity entity) -> void* {
         denseIdx              = static_cast<uint32_t>(_count++);
         _dense[denseIdx]      = entity;
         _sparse[entity.index] = denseIdx;
-
-        std::memset(_data + (denseIdx * _elementSize), 0, _elementSize);
     } else {
         if (_dense[denseIdx] != entity) {
             ZHLN::Panic("ECS: cannot replace a component through a stale entity handle");
@@ -171,6 +207,12 @@ auto SparseSet::InsertEmpty(Entity entity) -> void* {
         }
     }
     return _data + (denseIdx * _elementSize);
+}
+
+auto SparseSet::InsertEmpty(Entity entity) -> void* {
+    void* slot = ReserveSlot(entity);
+    std::memset(slot, 0, _elementSize);
+    return slot;
 }
 
 void SparseSet::Remove(Entity entity) {
@@ -186,12 +228,69 @@ void SparseSet::Remove(Entity entity) {
     uint32_t lastIdx = static_cast<uint32_t>(_count) - 1;
     if (denseIdx != lastIdx) {
         Entity lastEntity = _dense[lastIdx];
-        std::memcpy(_data + (denseIdx * _elementSize), _data + (lastIdx * _elementSize), _elementSize);
+        void*  lastComp   = _data + (lastIdx * _elementSize);
+        if (_relocate != nullptr) {
+            _relocate(component, lastComp);
+        } else {
+            std::memcpy(component, lastComp, _elementSize);
+        }
         _dense[denseIdx]          = lastEntity;
         _sparse[lastEntity.index] = denseIdx;
     }
     _sparse[entity.index] = INVALID_DENSE;
     _count--;
+}
+
+auto SparseSet::ExtractAndRemove(Entity entity, void* outBuffer) noexcept -> bool {
+    if (!Contains(entity)) {
+        return false;
+    }
+    uint32_t denseIdx  = _sparse[entity.index];
+    void*    component = _data + (denseIdx * _elementSize);
+    if (_relocate != nullptr) {
+        _relocate(outBuffer, component);
+    } else {
+        std::memcpy(outBuffer, component, _elementSize);
+    }
+
+    uint32_t lastIdx = static_cast<uint32_t>(_count) - 1;
+    if (denseIdx != lastIdx) {
+        Entity lastEntity = _dense[lastIdx];
+        void*  lastComp   = _data + (lastIdx * _elementSize);
+        if (_relocate != nullptr) {
+            _relocate(component, lastComp);
+        } else {
+            std::memcpy(component, lastComp, _elementSize);
+        }
+        _dense[denseIdx]          = lastEntity;
+        _sparse[lastEntity.index] = denseIdx;
+    }
+    _sparse[entity.index] = INVALID_DENSE;
+    _count--;
+    return true;
+}
+
+auto SparseSet::ExtractAll() noexcept -> ExtractedBatch {
+    if (_count == 0) {
+        return {};
+    }
+    if ((_sync != nullptr) && _sync->viewExportCount.load(std::memory_order::acquire) > 0) {
+        ZHLN::Panic("FFI MEMORY VIOLATION: SparseSet Clear during exported view");
+    }
+    ExtractedBatch batch {
+        .entities      = _dense,
+        .data          = _data,
+        .count         = _count,
+        .denseCapacity = _denseCapacity,
+    };
+    _dense         = nullptr;
+    _data          = nullptr;
+    _denseCapacity = 0;
+    _count         = 0;
+    if (_sparse != nullptr) {
+        std::memset(_sparse, 0xFF, _sparseCapacity * sizeof(uint32_t));
+    }
+    return batch;
 }
 
 auto SparseSet::Contains(Entity entity) const noexcept -> bool {
@@ -254,28 +353,57 @@ auto SparseSet::GetEntityView(const void* owner) const noexcept -> BufferView {
 Registry::Registry(): Registry(nullptr) {
 }
 
-Registry::Registry(std::pmr::memory_resource* memory): _memory(memory != nullptr ? memory : std::pmr::get_default_resource()), _typeInfo(_memory) {
+Registry::Registry(std::pmr::memory_resource* memory):
+    _memory(memory != nullptr ? memory : std::pmr::get_default_resource()), _slots(_memory), _retiredTables(_memory) {
 }
 
 // Component sets live in the same resource as all of their backing buffers.
-auto Registry::CreateSparseSet(size_t elementSize, size_t alignment, SparseSet::DestructorFn destructor) -> SparseSet* {
+auto Registry::CreateSparseSet(size_t elementSize, size_t alignment, SparseSet::DestructorFn destructor, SparseSet::RelocateFn relocate) -> SparseSet* {
     void* const storage = _memory->allocate(sizeof(SparseSet), alignof(SparseSet));
-    return std::construct_at(static_cast<SparseSet*>(storage), elementSize, alignment, &sync, destructor, _memory);
+    return std::construct_at(static_cast<SparseSet*>(storage), elementSize, alignment, &sync, destructor, relocate, _memory);
+}
+
+void Registry::DestroyKeyTable(KeyTable* table) noexcept {
+    if (table == nullptr) {
+        return;
+    }
+    if (table->entries != nullptr) {
+        for (size_t i = 0; i < table->capacity; ++i) {
+            std::destroy_at(&table->entries[i]);
+        }
+        _memory->deallocate(table->entries, table->capacity * sizeof(KeyEntry), alignof(KeyEntry));
+    }
+    std::destroy_at(table);
+    _memory->deallocate(table, sizeof(KeyTable), alignof(KeyTable));
 }
 
 Registry::~Registry() {
     // Storage destruction only runs component destructors. External handles
     // belong to the scene cleanup pass, not the registry.
-    for (size_t i = 0; i < _compCapacity; ++i) {
-        SparseSet* set = _components[i];
-        _components[i] = nullptr;
+    for (auto& slot: _slots) {
+        SparseSet* set = slot.set;
+        slot.set       = nullptr;
         if (set != nullptr) {
             std::destroy_at(set);
             _memory->deallocate(set, sizeof(SparseSet), alignof(SparseSet));
         }
     }
-    if (_components != nullptr) {
-        _memory->deallocate(static_cast<void*>(_components), _compCapacity * sizeof(SparseSet*), alignof(SparseSet*));
+    _slots.clear();
+
+    KeyTable* active = _activeKeyTable.exchange(nullptr, std::memory_order::acq_rel);
+    DestroyKeyTable(active);
+    for (KeyTable* retired: _retiredTables) {
+        DestroyKeyTable(retired);
+    }
+    _retiredTables.clear();
+
+    if (_schemaTable.entries != nullptr) {
+        _memory->deallocate(_schemaTable.entries, _schemaTable.capacity * sizeof(SchemaEntry), alignof(SchemaEntry));
+        _schemaTable = {};
+    }
+    if (_nameTable.entries != nullptr) {
+        _memory->deallocate(_nameTable.entries, _nameTable.capacity * sizeof(NameEntry), alignof(NameEntry));
+        _nameTable = {};
     }
     if (_generations != nullptr) {
         _memory->deallocate(_generations, _entityCapacity * sizeof(uint32_t), alignof(uint32_t));
@@ -307,19 +435,271 @@ void Registry::EnsureEntityCapacity(uint32_t index) {
     }
 }
 
-void Registry::EnsureComponentCapacity(uint32_t id) {
-    if (id < _compCapacity) {
+auto Registry::FindSparseSet(uint64_t typeKey) const noexcept -> SparseSet* {
+    const KeyTable* tbl = _activeKeyTable.load(std::memory_order::acquire);
+    if (tbl == nullptr) {
+        return nullptr;
+    }
+    const size_t mask = tbl->mask;
+    size_t       idx  = Mix64(typeKey) & mask;
+    for (;;) {
+        SparseSet* set = tbl->entries[idx].set.load(std::memory_order::acquire);
+        if (set == nullptr) {
+            return nullptr;
+        }
+        if (tbl->entries[idx].key == typeKey) {
+            return set;
+        }
+        idx = (idx + 1) & mask;
+    }
+}
+
+auto Registry::FindSlotIndexByKeyLocked(uint64_t typeKey) const noexcept -> uint32_t {
+    if (_schemaTable.entries == nullptr) {
+        return InvalidSlot;
+    }
+    const size_t mask = _schemaTable.mask;
+    size_t       idx  = Mix64(typeKey) & mask;
+    for (;;) {
+        const SchemaEntry& entry = _schemaTable.entries[idx];
+        if (entry.slot == InvalidSlot) {
+            return InvalidSlot;
+        }
+        if (entry.key == typeKey) {
+            return entry.slot;
+        }
+        idx = (idx + 1) & mask;
+    }
+}
+
+void Registry::InsertSchemaTableLocked(uint64_t typeKey, uint32_t slotIndex) {
+    if (_schemaTable.entries == nullptr || ((_schemaTable.count + 1) * 10 >= _schemaTable.capacity * 7)) {
+        const size_t newCap  = (_schemaTable.capacity == 0) ? 64 : (_schemaTable.capacity * 2);
+        const size_t newMask = newCap - 1;
+        auto*        newEnts = static_cast<SchemaEntry*>(_memory->allocate(newCap * sizeof(SchemaEntry), alignof(SchemaEntry)));
+        for (size_t i = 0; i < newCap; ++i) {
+            newEnts[i] = SchemaEntry {};
+        }
+
+        size_t newCount = 0;
+        if (_schemaTable.entries != nullptr) {
+            for (size_t i = 0; i < _schemaTable.capacity; ++i) {
+                const SchemaEntry& old = _schemaTable.entries[i];
+                if (old.slot == InvalidSlot) {
+                    continue;
+                }
+                size_t pos = Mix64(old.key) & newMask;
+                while (newEnts[pos].slot != InvalidSlot) {
+                    pos = (pos + 1) & newMask;
+                }
+                newEnts[pos] = old;
+                ++newCount;
+            }
+            _memory->deallocate(_schemaTable.entries, _schemaTable.capacity * sizeof(SchemaEntry), alignof(SchemaEntry));
+        }
+        _schemaTable = SchemaTable {.entries = newEnts, .capacity = newCap, .mask = newMask, .count = newCount};
+    }
+
+    size_t idx = Mix64(typeKey) & _schemaTable.mask;
+    for (;;) {
+        SchemaEntry& entry = _schemaTable.entries[idx];
+        if (entry.slot == InvalidSlot) {
+            entry = SchemaEntry {.key = typeKey, .slot = slotIndex};
+            _schemaTable.count++;
+            return;
+        }
+        if (entry.key == typeKey) {
+            entry.slot = slotIndex;
+            return;
+        }
+        idx = (idx + 1) & _schemaTable.mask;
+    }
+}
+
+auto Registry::FindSlotIndexByNameLocked(std::string_view name) const noexcept -> uint32_t {
+    if (name.empty() || _nameTable.entries == nullptr) {
+        return InvalidSlot;
+    }
+    const uint64_t h    = Hash64(name);
+    const size_t   mask = _nameTable.mask;
+    size_t         idx  = Mix64(h) & mask;
+    for (;;) {
+        const NameEntry& entry = _nameTable.entries[idx];
+        if (entry.slot == InvalidSlot) {
+            return InvalidSlot;
+        }
+        if (entry.nameHash == h && _slots[entry.slot].name == name) {
+            return entry.slot;
+        }
+        idx = (idx + 1) & mask;
+    }
+}
+
+auto Registry::FindSlotIndexForInspectionLocked(std::string_view name) const noexcept -> uint32_t {
+    if (name.empty()) {
+        return InvalidSlot;
+    }
+    if (const uint32_t byName = FindSlotIndexByNameLocked(name); byName != InvalidSlot) {
+        return byName;
+    }
+    if (const uint32_t byKey = FindSlotIndexByKeyLocked(Hash64(name)); byKey != InvalidSlot) {
+        const ComponentSlot& slot = _slots[byKey];
+        if (!slot.name.empty() || slot.ops.published) {
+            return byKey;
+        }
+    }
+    return InvalidSlot;
+}
+
+void Registry::InsertKeyTableLocked(uint64_t typeKey, uint32_t slotIndex, SparseSet* set) {
+    KeyTable* old = _activeKeyTable.load(std::memory_order::relaxed);
+    if (old == nullptr || ((old->count + 1) * 10 >= old->capacity * 7)) {
+        const size_t newCap   = (old == nullptr) ? 64 : (old->capacity * 2);
+        const size_t newMask  = newCap - 1;
+        void*        tblRaw   = _memory->allocate(sizeof(KeyTable), alignof(KeyTable));
+        void*        entsRaw  = _memory->allocate(newCap * sizeof(KeyEntry), alignof(KeyEntry));
+        auto*        entries  = static_cast<KeyEntry*>(entsRaw);
+        for (size_t i = 0; i < newCap; ++i) {
+            std::construct_at(&entries[i]);
+        }
+        auto* newTbl = std::construct_at(static_cast<KeyTable*>(tblRaw), KeyTable {.entries = entries, .capacity = newCap, .mask = newMask, .count = 0});
+
+        auto insertFresh = [newTbl](uint64_t k, uint32_t s, SparseSet* sp) {
+            size_t i = Mix64(k) & newTbl->mask;
+            while (newTbl->entries[i].set.load(std::memory_order::relaxed) != nullptr) {
+                i = (i + 1) & newTbl->mask;
+            }
+            newTbl->entries[i].key  = k;
+            newTbl->entries[i].slot = s;
+            newTbl->entries[i].set.store(sp, std::memory_order::relaxed);
+            newTbl->count++;
+        };
+
+        if (old != nullptr) {
+            for (size_t i = 0; i < old->capacity; ++i) {
+                SparseSet* sp = old->entries[i].set.load(std::memory_order::relaxed);
+                if (sp != nullptr) {
+                    insertFresh(old->entries[i].key, old->entries[i].slot, sp);
+                }
+            }
+        }
+        insertFresh(typeKey, slotIndex, set);
+
+        _activeKeyTable.store(newTbl, std::memory_order::release);
+        if (old != nullptr) {
+            _retiredTables.push_back(old);
+        }
         return;
     }
-    size_t oldCap = _compCapacity;
-    _compCapacity = id + 8;
-    _components   = static_cast<SparseSet**>(
-        ReallocAligned(_memory, static_cast<void*>(_components), oldCap * sizeof(SparseSet*), _compCapacity * sizeof(SparseSet*), alignof(SparseSet*))
-    );
-    for (size_t i = oldCap; i < _compCapacity; ++i) {
-        _components[i] = nullptr;
+
+    size_t idx = Mix64(typeKey) & old->mask;
+    while (old->entries[idx].set.load(std::memory_order::relaxed) != nullptr) {
+        idx = (idx + 1) & old->mask;
     }
-    _typeInfo.resize(_compCapacity);
+    old->entries[idx].key  = typeKey;
+    old->entries[idx].slot = slotIndex;
+    old->entries[idx].set.store(set, std::memory_order::release);
+    old->count++;
+}
+
+auto Registry::InsertNameTableLocked(std::string_view name, uint32_t slotIndex) -> bool {
+    if (name.empty()) {
+        return true;
+    }
+    const uint64_t h = Hash64(name);
+
+    if (_nameTable.entries == nullptr || ((_nameTable.count + 1) * 10 >= _nameTable.capacity * 7)) {
+        const size_t newCap  = (_nameTable.capacity == 0) ? 64 : (_nameTable.capacity * 2);
+        const size_t newMask = newCap - 1;
+        auto*        newEnts = static_cast<NameEntry*>(_memory->allocate(newCap * sizeof(NameEntry), alignof(NameEntry)));
+        for (size_t i = 0; i < newCap; ++i) {
+            newEnts[i] = NameEntry {};
+        }
+
+        size_t newCount = 0;
+        if (_nameTable.entries != nullptr) {
+            for (size_t i = 0; i < _nameTable.capacity; ++i) {
+                const NameEntry& old = _nameTable.entries[i];
+                if (old.slot == InvalidSlot) {
+                    continue;
+                }
+                // Drop stale name mappings if a slot was renamed.
+                if (Hash64(_slots[old.slot].name) != old.nameHash) {
+                    continue;
+                }
+                size_t pos = Mix64(old.nameHash) & newMask;
+                while (newEnts[pos].slot != InvalidSlot) {
+                    pos = (pos + 1) & newMask;
+                }
+                newEnts[pos] = old;
+                ++newCount;
+            }
+            _memory->deallocate(_nameTable.entries, _nameTable.capacity * sizeof(NameEntry), alignof(NameEntry));
+        }
+        _nameTable = NameTable {.entries = newEnts, .capacity = newCap, .mask = newMask, .count = newCount};
+    }
+
+    size_t idx = Mix64(h) & _nameTable.mask;
+    for (;;) {
+        NameEntry& entry = _nameTable.entries[idx];
+        if (entry.slot == InvalidSlot) {
+            entry = NameEntry {.nameHash = h, .slot = slotIndex};
+            _nameTable.count++;
+            return true;
+        }
+        if (entry.nameHash == h && _slots[entry.slot].name == name) {
+            return entry.slot == slotIndex;
+        }
+        idx = (idx + 1) & _nameTable.mask;
+    }
+}
+
+auto Registry::EnsureTypedSlotLocked(uint64_t typeKey, const ComponentOps& ops) -> uint32_t {
+    if (const uint32_t existing = FindSlotIndexByKeyLocked(typeKey); existing != InvalidSlot) {
+        return existing;
+    }
+    const auto slotIdx = static_cast<uint32_t>(_slots.size());
+    _slots.emplace_back(_memory);
+    ComponentSlot& slot = _slots.back();
+    slot.typeKey        = typeKey;
+    slot.set            = nullptr;
+    slot.ops            = ops;
+    InsertSchemaTableLocked(typeKey, slotIdx);
+    return slotIdx;
+}
+
+auto Registry::EnsureLiveSetLocked(uint32_t slotIndex) -> SparseSet* {
+    ComponentSlot& slot = _slots[slotIndex];
+    if (slot.set != nullptr) {
+        return slot.set;
+    }
+    SparseSet* set = CreateSparseSet(slot.ops.size, slot.ops.alignment, slot.ops.destroy, slot.ops.relocate);
+    if (slot.ops.onRetire != nullptr) {
+        set->SetRetireHook(slot.ops.onRetire, slot.ops.hookCtx);
+    }
+    slot.set = set;
+    InsertKeyTableLocked(slot.typeKey, slotIndex, set);
+    _schemaEpoch.fetch_add(1, std::memory_order::release);
+    return set;
+}
+
+auto Registry::CreateDynamicSlotLocked(std::string_view name, uint64_t typeKey, size_t size, size_t alignment, uint64_t layoutHash) -> uint32_t {
+    const auto slotIdx = static_cast<uint32_t>(_slots.size());
+    _slots.emplace_back(_memory);
+    ComponentSlot& slot = _slots.back();
+    slot.typeKey        = typeKey;
+    slot.name.assign(name.data(), name.size());
+    slot.set            = nullptr;
+    slot.ops            = ComponentOps {
+        .size       = size,
+        .alignment  = alignment,
+        .layoutHash = layoutHash,
+        .debugDump  = +[](const void*, std::string& out) { out += "{}"; },
+        .isDynamic  = true,
+    };
+    InsertSchemaTableLocked(typeKey, slotIdx);
+    (void)InsertNameTableLocked(slot.name, slotIdx);
+    return slotIdx;
 }
 
 auto Registry::Create() -> Entity {
@@ -333,18 +713,44 @@ auto Registry::Create() -> Entity {
 }
 
 void Registry::Destroy(Entity entity) {
+    std::pmr::vector<PendingHeapRetire> pending(_memory);
     ZHLN::Lock(sync.shadowLock, [&] -> void {
         if (entity.index >= _entityCapacity || _generations[entity.index] != entity.generation) {
             return;
         }
-        for (size_t i = 0; i < _compCapacity; ++i) {
-            if (_components[i] != nullptr) {
-                _components[i]->Remove(entity);
+        for (auto& slot: _slots) {
+            if (slot.set == nullptr) {
+                continue;
+            }
+            if (slot.ops.onRetire != nullptr && slot.set->Contains(entity)) {
+                void* staged = _memory->allocate(slot.ops.size, slot.ops.alignment);
+                if (slot.set->ExtractAndRemove(entity, staged)) {
+                    pending.push_back(PendingHeapRetire {
+                        .onRetire  = slot.ops.onRetire,
+                        .hookCtx   = slot.ops.hookCtx,
+                        .destroy   = slot.ops.destroy,
+                        .storage   = staged,
+                        .size      = slot.ops.size,
+                        .alignment = slot.ops.alignment,
+                    });
+                } else {
+                    _memory->deallocate(staged, slot.ops.size, slot.ops.alignment);
+                }
+            } else {
+                slot.set->Remove(entity);
             }
         }
         _generations[entity.index]++;
         _freeIndices[_freeCount++] = entity.index;
     });
+
+    for (const PendingHeapRetire& item: pending) {
+        item.onRetire(item.hookCtx, entity, item.storage);
+        if (item.destroy != nullptr) {
+            item.destroy(item.storage);
+        }
+        _memory->deallocate(item.storage, item.size, item.alignment);
+    }
 }
 
 auto Registry::IsAlive(Entity entity) const noexcept -> bool {
@@ -352,10 +758,26 @@ auto Registry::IsAlive(Entity entity) const noexcept -> bool {
 }
 
 void Registry::Clear() {
+    std::pmr::vector<PendingRetireBatch> batches(_memory);
     ZHLN::Lock(sync.shadowLock, [&] -> void {
-        for (size_t i = 0; i < _compCapacity; ++i) {
-            if (_components[i] != nullptr) {
-                _components[i]->Clear();
+        for (auto& slot: _slots) {
+            if (slot.set == nullptr) {
+                continue;
+            }
+            if (slot.ops.onRetire != nullptr && slot.set->Count() > 0) {
+                SparseSet::ExtractedBatch extracted = slot.set->ExtractAll();
+                if (extracted.count > 0) {
+                    batches.push_back(PendingRetireBatch {
+                        .onRetire    = slot.ops.onRetire,
+                        .hookCtx     = slot.ops.hookCtx,
+                        .destroy     = slot.ops.destroy,
+                        .batch       = extracted,
+                        .elementSize = slot.ops.size,
+                        .alignment   = slot.ops.alignment,
+                    });
+                }
+            } else {
+                slot.set->Clear();
             }
         }
         _freeCount   = 0;
@@ -365,86 +787,307 @@ void Registry::Clear() {
             _freeIndices[_freeCount++] = static_cast<uint32_t>(i);
         }
     });
+
+    for (const PendingRetireBatch& entry: batches) {
+        for (size_t i = 0; i < entry.batch.count; ++i) {
+            void* component = entry.batch.data + (i * entry.elementSize);
+            entry.onRetire(entry.hookCtx, entry.batch.entities[i], component);
+            if (entry.destroy != nullptr) {
+                entry.destroy(component);
+            }
+        }
+        if (entry.batch.entities != nullptr) {
+            _memory->deallocate(entry.batch.entities, entry.batch.denseCapacity * sizeof(Entity), alignof(Entity));
+        }
+        if (entry.batch.data != nullptr) {
+            _memory->deallocate(entry.batch.data, entry.batch.denseCapacity * entry.elementSize, entry.alignment);
+        }
+    }
 }
 
-auto Registry::RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment) -> uint32_t {
+void Registry::RemoveByKey(Entity entity, uint64_t typeKey) {
+    SparseSet* fastSet = FindSparseSet(typeKey);
+    if (fastSet == nullptr || !fastSet->Contains(entity)) {
+        return;
+    }
+    PendingRetire pending {};
+    ZHLN::Lock(sync.shadowLock, [&] -> void {
+        const uint32_t slotIdx = FindSlotIndexByKeyLocked(typeKey);
+        if (slotIdx == InvalidSlot) {
+            return;
+        }
+        ComponentSlot& slot = _slots[slotIdx];
+        if (slot.set == nullptr || !slot.set->Contains(entity)) {
+            return;
+        }
+        if (slot.ops.onRetire != nullptr) {
+            void* staged = pending.Allocate(_memory, slot.ops.size, slot.ops.alignment);
+            if (slot.set->ExtractAndRemove(entity, staged)) {
+                pending.onRetire = slot.ops.onRetire;
+                pending.hookCtx  = slot.ops.hookCtx;
+                pending.destroy  = slot.ops.destroy;
+            }
+        } else {
+            slot.set->Remove(entity);
+        }
+    });
+    pending.InvokeAndRelease(_memory, entity);
+}
+
+auto Registry::RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment, uint64_t layoutHash) -> uint32_t {
+    if (name.empty() || !IsValidLayout(size, alignment)) {
+        return InvalidSlot;
+    }
+    const uint64_t key = Hash64(name);
     return ZHLN::Lock(sync.shadowLock, [&] -> uint32_t {
-        const uint32_t id = ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t {
-            uint32_t family = 0xFFFFFFFFu;
-            bool     fresh  = false;
-            if (const auto named = s_NameToFamilyID.Find(name)) {
-                family = *named;
-            } else if (const auto hashed = s_HashToDense.Find(HashTypeName(name))) {
-                family = *hashed;
-            } else {
-                family = s_TypeCounter++;
-                s_HashToDense.Insert(HashTypeName(name), family);
-                fresh = true;
+        if (const uint32_t byKey = FindSlotIndexByKeyLocked(key); byKey != InvalidSlot) {
+            const ComponentSlot& slot = _slots[byKey];
+            if (!slot.ops.isDynamic || slot.name != name || slot.ops.size != size || slot.ops.alignment != alignment ||
+                slot.ops.layoutHash != layoutHash) {
+                return InvalidSlot;
             }
-            const auto found = s_DynamicFamilyLayouts.find(family);
-            if (found != s_DynamicFamilyLayouts.end()) {
-                if (found->second != std::pair {size, alignment}) {
-                    return 0xFFFFFFFFu;
-                }
-            } else {
-                // Both a known name and a known typed hash are protected: a
-                // spelling alias must not convert a C++ family to raw storage.
-                if (!fresh) {
-                    return 0xFFFFFFFFu;
-                }
-                s_DynamicFamilyLayouts.emplace(family, std::pair {size, alignment});
-            }
-            name = *s_FamilyNames.emplace(name).first;
-            s_NameToFamilyID.Insert(name, family);
-            return family;
-        });
-        if (id == 0xFFFFFFFFu) {
-            return id;
+            return byKey;
         }
-        EnsureComponentCapacity(id);
-        if (_components[id] != nullptr) {
-            // Family names are process-global; storage is per registry. Never
-            // reinterpret a typed family, or an existing incompatible layout.
-            if (!_typeInfo[id].isDynamic || _typeInfo[id].size != size || _typeInfo[id].alignment != alignment) {
-                return 0xFFFFFFFFu;
-            }
-            return id;
+        // Refuse any spelling alias that collides with an already registered
+        // component's display name (for example, a native typed short name).
+        if (FindSlotIndexByNameLocked(name) != InvalidSlot) {
+            return InvalidSlot;
         }
-        _components[id] = CreateSparseSet(size, alignment);
-        _typeInfo[id]   = {
-            .name      = name,
-            .size      = size,
-            .alignment = alignment,
-            .debugDump = [](const void*, std::string& out) -> void { out += "{}"; },
-            .isDynamic = true,
-        };
-        return id;
+        return CreateDynamicSlotLocked(name, key, size, alignment, layoutHash);
     });
 }
 
-auto Registry::RemoveDynamic(Entity entity, uint32_t familyID) -> bool {
-    return ZHLN::Lock(sync.shadowLock, [&] -> bool {
-        // Same guards as AddDynamic: never touch a typed family's storage,
-        // whose components were constructed and may own resources.
-        if (familyID >= _compCapacity || _components[familyID] == nullptr || !_typeInfo[familyID].isDynamic) {
-            return false;
-        }
-        if (!_components[familyID]->Contains(entity)) {
-            return false;
-        }
-        _components[familyID]->Remove(entity);
-        return true;
-    });
+auto Registry::HasFamily(std::string_view name) const noexcept -> bool {
+    return ZHLN::Lock(sync.shadowLock, [&] -> bool { return FindSlotIndexForInspectionLocked(name) != InvalidSlot; });
 }
 
-auto Registry::AddDynamic(Entity entity, uint32_t familyID) -> void* {
+auto Registry::GetRawByName(Entity entity, std::string_view name) const noexcept -> void* {
     return ZHLN::Lock(sync.shadowLock, [&] -> void* {
-        // Do not grow the registry for unknown (or sentinel) family IDs.
-        // InsertEmpty cannot construct typed components or release handles.
-        if (!IsAlive(entity) || familyID >= _compCapacity || _components[familyID] == nullptr || !_typeInfo[familyID].isDynamic) {
+        const uint32_t slotIdx = FindSlotIndexForInspectionLocked(name);
+        if (slotIdx == InvalidSlot) {
             return nullptr;
         }
-        return _components[familyID]->InsertEmpty(entity);
+        SparseSet* set = _slots[slotIdx].set;
+        return set != nullptr ? set->Get(entity) : nullptr;
+    });
+}
+
+void Registry::DebugDumpEntity(Entity entity, std::string& out) const {
+    ZHLN::Lock(sync.shadowLock, [&] -> void {
+        for (const ComponentSlot& slot: _slots) {
+            if (slot.set == nullptr) {
+                continue;
+            }
+            if (void* raw = slot.set->Get(entity)) {
+                out += slot.name;
+                out += ": ";
+                if (slot.ops.debugDump != nullptr) {
+                    slot.ops.debugDump(raw, out);
+                } else {
+                    out += "{}";
+                }
+                out += "\n";
+            }
+        }
+    });
+}
+
+auto Registry::IsPublishedComponent(std::string_view typeName) const noexcept -> bool {
+    if (typeName.empty()) {
+        return false;
+    }
+    const uint64_t key = Hash64(typeName);
+    return ZHLN::Lock(sync.shadowLock, [&] -> bool {
+        const uint32_t slotIdx = FindSlotIndexByKeyLocked(key);
+        if (slotIdx == InvalidSlot) {
+            return false;
+        }
+        const ComponentOps& ops = _slots[slotIdx].ops;
+        return !ops.isDynamic && ops.published;
+    });
+}
+
+auto Registry::IsReadOnlyComponent(std::string_view typeName) const noexcept -> bool {
+    if (typeName.empty()) {
+        return false;
+    }
+    const uint64_t key = Hash64(typeName);
+    return ZHLN::Lock(sync.shadowLock, [&] -> bool {
+        const uint32_t slotIdx = FindSlotIndexByKeyLocked(key);
+        if (slotIdx == InvalidSlot) {
+            return false;
+        }
+        const ComponentOps& ops = _slots[slotIdx].ops;
+        return !ops.isDynamic && ops.readOnly;
+    });
+}
+
+auto Registry::AttachRaw(Entity entity, std::string_view typeName, size_t size, size_t alignment, uint64_t layoutHash) -> void* {
+    if (typeName.empty() || !IsValidLayout(size, alignment)) {
+        return nullptr;
+    }
+    const uint64_t key = Hash64(typeName);
+    PendingRetire  pending {};
+    void*          result = ZHLN::Lock(sync.shadowLock, [&] -> void* {
+        if (!IsAlive(entity)) {
+            return nullptr;
+        }
+        if (const uint32_t slotIdx = FindSlotIndexByKeyLocked(key); slotIdx != InvalidSlot) {
+            ComponentSlot& slot = _slots[slotIdx];
+            if (!slot.ops.isDynamic) {
+                if (!slot.ops.published) {
+                    return nullptr;
+                }
+                if (layoutHash == 0 || slot.ops.size != size || slot.ops.alignment != alignment || slot.ops.layoutHash != layoutHash) {
+                    return nullptr;
+                }
+                SparseSet* set = EnsureLiveSetLocked(slotIdx);
+                if (void* existing = set->Get(entity)) {
+                    if (slot.ops.onRetire != nullptr) {
+                        void* staged = pending.Allocate(_memory, slot.ops.size, slot.ops.alignment);
+                        if (slot.ops.relocate != nullptr) {
+                            slot.ops.relocate(staged, existing);
+                        } else {
+                            std::memcpy(staged, existing, slot.ops.size);
+                            if (slot.ops.destroy != nullptr) {
+                                slot.ops.destroy(existing);
+                            }
+                        }
+                        pending.onRetire = slot.ops.onRetire;
+                        pending.hookCtx  = slot.ops.hookCtx;
+                        pending.destroy  = slot.ops.destroy;
+                    } else if (slot.ops.destroy != nullptr) {
+                        slot.ops.destroy(existing);
+                    }
+                    if (slot.ops.constructDefault != nullptr) {
+                        slot.ops.constructDefault(existing);
+                    } else {
+                        std::memset(existing, 0, slot.ops.size);
+                    }
+                    return existing;
+                }
+                void* storage = set->ReserveSlot(entity);
+                if (slot.ops.constructDefault != nullptr) {
+                    slot.ops.constructDefault(storage);
+                } else {
+                    std::memset(storage, 0, slot.ops.size);
+                }
+                return storage;
+            }
+            if (slot.name != typeName || slot.ops.size != size || slot.ops.alignment != alignment || slot.ops.layoutHash != layoutHash) {
+                return nullptr;
+            }
+            SparseSet* set = EnsureLiveSetLocked(slotIdx);
+            return set->InsertEmpty(entity);
+        }
+
+        // Refuse dynamic registration if typeName collides with an existing
+        // slot's display name (for example, a native component's short name).
+        if (FindSlotIndexByNameLocked(typeName) != InvalidSlot) {
+            return nullptr;
+        }
+        const uint32_t newSlotIdx = CreateDynamicSlotLocked(typeName, key, size, alignment, layoutHash);
+        SparseSet*     set        = EnsureLiveSetLocked(newSlotIdx);
+        return set->InsertEmpty(entity);
+    });
+    if (pending.onRetire != nullptr) {
+        pending.InvokeAndRelease(_memory, entity);
+        if (SparseSet* live = FindSparseSet(key)) {
+            return live->Get(entity);
+        }
+        return nullptr;
+    }
+    return result;
+}
+
+auto Registry::DetachRaw(Entity entity, std::string_view typeName) -> bool {
+    if (typeName.empty()) {
+        return false;
+    }
+    const uint64_t key = Hash64(typeName);
+    PendingRetire  pending {};
+    const bool     detached = ZHLN::Lock(sync.shadowLock, [&] -> bool {
+        if (!IsAlive(entity)) {
+            return false;
+        }
+        const uint32_t slotIdx = FindSlotIndexByKeyLocked(key);
+        if (slotIdx == InvalidSlot) {
+            return false;
+        }
+        ComponentSlot& slot = _slots[slotIdx];
+        if (!slot.ops.isDynamic) {
+            if (!slot.ops.published || slot.set == nullptr || !slot.set->Contains(entity)) {
+                return false;
+            }
+            if (slot.ops.onRetire != nullptr) {
+                void* staged = pending.Allocate(_memory, slot.ops.size, slot.ops.alignment);
+                if (slot.set->ExtractAndRemove(entity, staged)) {
+                    pending.onRetire = slot.ops.onRetire;
+                    pending.hookCtx  = slot.ops.hookCtx;
+                    pending.destroy  = slot.ops.destroy;
+                }
+            } else {
+                slot.set->Remove(entity);
+            }
+            return true;
+        }
+        if (slot.name != typeName || slot.set == nullptr || !slot.set->Contains(entity)) {
+            return false;
+        }
+        slot.set->Remove(entity);
+        return true;
+    });
+    pending.InvokeAndRelease(_memory, entity);
+    return detached;
+}
+
+auto Registry::GetRaw(Entity entity, std::string_view typeName) const noexcept -> void* {
+    if (typeName.empty()) {
+        return nullptr;
+    }
+    const uint64_t key = Hash64(typeName);
+    return ZHLN::Lock(sync.shadowLock, [&] -> void* {
+        if (!IsAlive(entity)) {
+            return nullptr;
+        }
+        const uint32_t slotIdx = FindSlotIndexByKeyLocked(key);
+        if (slotIdx == InvalidSlot) {
+            return nullptr;
+        }
+        const ComponentSlot& slot = _slots[slotIdx];
+        if (!slot.ops.isDynamic) {
+            if (!slot.ops.published) {
+                return nullptr;
+            }
+        } else if (slot.name != typeName) {
+            return nullptr;
+        }
+        return slot.set != nullptr ? slot.set->Get(entity) : nullptr;
+    });
+}
+
+auto Registry::EntitiesWithRaw(std::string_view typeName) const noexcept -> std::span<const Entity> {
+    if (typeName.empty()) {
+        return {};
+    }
+    const uint64_t key = Hash64(typeName);
+    return ZHLN::Lock(sync.shadowLock, [&] -> std::span<const Entity> {
+        const uint32_t slotIdx = FindSlotIndexByKeyLocked(key);
+        if (slotIdx == InvalidSlot) {
+            return {};
+        }
+        const ComponentSlot& slot = _slots[slotIdx];
+        if (!slot.ops.isDynamic) {
+            if (!slot.ops.published) {
+                return {};
+            }
+        } else if (slot.name != typeName) {
+            return {};
+        }
+        if (slot.set == nullptr) {
+            return {};
+        }
+        return {slot.set->GetDenseArray(), slot.set->Count()};
     });
 }
 
